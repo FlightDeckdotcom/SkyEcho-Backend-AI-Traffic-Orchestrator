@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-2-ai-traffic-orchestrator",
-  "version": "1.2.0",
-  "description": "SkyEcho Backend v1.2 safe boot with lazy GitHub CSV navdata sync",
+  "name": "skyecho-backend-v1-2-1-ai-traffic-orchestrator",
+  "version": "1.2.1",
+  "description": "SkyEcho Backend v1.2.1 safe boot with lazy GitHub CSV navdata sync and csv-parse dependency fix",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -16,6 +16,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.18.3",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "csv-parse": "^5.5.6"
   }
 }

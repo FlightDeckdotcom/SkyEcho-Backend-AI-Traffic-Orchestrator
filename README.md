@@ -1,4 +1,6 @@
-# SkyEcho Backend v1.2 — Safe Boot + Lazy GitHub CSV NavData
+SkyEcho Backend v1.2.1 — dependency hotfix for csv-parse/sync on Render.
+
+# SkyEcho Backend v1.2.1 — Safe Boot + Lazy GitHub CSV NavData
 
 This version fixes Render `Exited with status 134` by **not downloading/parsing the large GitHub CSV navdata during startup**.
 
@@ -25,7 +27,7 @@ NAVDATA_BASE_URL=https://raw.githubusercontent.com/FlightDeckdotcom/SKYECHOCABIN
 PREFER_REMOTE_NAVDATA=false
 ```
 
-Keep `PREFER_REMOTE_NAVDATA=false` for v1.2. Use `/data/sync` after startup.
+Keep `PREFER_REMOTE_NAVDATA=false` for v1.2.1. Use `/data/sync` after startup.
 
 ## Test
 ```txt
