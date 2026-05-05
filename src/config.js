@@ -8,5 +8,7 @@ module.exports = {
   defaultAirport: process.env.DEFAULT_AIRPORT || 'TKPK',
   defaultRadiusNm: num('DEFAULT_RADIUS_NM', 100),
   defaultDensity: num('DEFAULT_DENSITY', 3),
-  enableAiTraffic: String(process.env.ENABLE_AI_TRAFFIC || 'true').toLowerCase() !== 'false'
+  enableAiTraffic: String(process.env.ENABLE_AI_TRAFFIC || 'true').toLowerCase() !== 'false',
+  navDataBaseUrl: process.env.NAVDATA_BASE_URL || 'https://raw.githubusercontent.com/FlightDeckdotcom/SKYECHOCABIN-Discord-Bot/main/data',
+  preferRemoteNavData: String(process.env.PREFER_REMOTE_NAVDATA || 'true').toLowerCase() !== 'false'
 };
