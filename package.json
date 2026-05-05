@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-2-1-ai-traffic-orchestrator",
-  "version": "1.2.1",
-  "description": "SkyEcho Backend v1.2.1 safe boot with lazy GitHub CSV navdata sync and csv-parse dependency fix",
+  "name": "skyecho-backend-v1-3-ai-traffic-voice-pacing",
+  "version": "1.3.0",
+  "description": "SkyEcho Backend v1.3 backend voice router, AI traffic radio pacing, Piper role routing",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
