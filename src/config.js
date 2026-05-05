@@ -23,5 +23,9 @@ module.exports = {
   trafficPiperVoicePool: process.env.TRAFFIC_PIPER_VOICE_POOL || 'models/piper/traffic/medium/en_US-lessac-medium.onnx',
   cabinPiperVoice: process.env.CABIN_PIPER_VOICE || 'models/piper/cabin/medium/en_US-lessac-medium.onnx',
   discordBridgeUrl: process.env.DISCORD_BRIDGE_URL || '',
-  discordBridgeSecret: process.env.DISCORD_BRIDGE_SECRET || process.env.BRIDGE_SECRET || ''
+  discordBridgeSecret: process.env.DISCORD_BRIDGE_SECRET || process.env.BRIDGE_SECRET || '',
+  userCallsigns: process.env.USER_CALLSIGNS || process.env.USER_CALLSIGN || 'BWA268,N23566',
+  userPriorityHoldMs: num('USER_PRIORITY_HOLD_MS', 9000),
+  userPttHoldMs: num('USER_PTT_HOLD_MS', 4500),
+  oneWorldMode: String(process.env.ONE_WORLD_MODE || 'true').toLowerCase() !== 'false'
 };

@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const { spawnFromSchedules } = require('./SpawnManager');
+const { spawnFromSchedules, normalizeCallsign } = require('./SpawnManager');
 const { updateKinematics } = require('./AircraftStateMachine');
 const Phrase = require('../atc/Phraseology');
 const { adsbPacket } = require('./TelemetryBroadcaster');
@@ -19,6 +19,51 @@ class TrafficOrchestrator extends EventEmitter {
     this.lastRadioAt = 0;
     this.radioMinGapMs = Number(config.radioMinGapMs || 11000);
     this.phaseScale = Number(config.aiPhaseScale || 2.5);
+    this.oneWorldMode = config.oneWorldMode !== false;
+    this.userCallsigns = new Set(String(config.userCallsigns || '').split(',').map(normalizeCallsign).filter(Boolean));
+    this.userAircraft = null;
+    this.userPriorityUntil = 0;
+    this.userPttActive = false;
+  }
+
+  setUserAircraft(data = {}) {
+    const callsign = data.callsign || data.userCallsign || data.flightCallsign;
+    const norm = normalizeCallsign(callsign);
+    if (!norm) return this.userAircraft;
+    this.userCallsigns.add(norm);
+    this.userAircraft = {
+      id: 'user',
+      callsign: norm,
+      spokenCallsign: data.spokenCallsign || data.spoken || norm,
+      origin: data.origin || data.airport || this.airport,
+      dest: data.dest || data.destination || data.to || undefined,
+      runway: data.runway || '07',
+      updatedAt: Date.now()
+    };
+    this.removeUserAircraftFromTraffic();
+    return this.userAircraft;
+  }
+
+  isUserCallsign(callsign) {
+    return this.userCallsigns.has(normalizeCallsign(callsign));
+  }
+
+  removeUserAircraftFromTraffic() {
+    const before = this.aircraft.length;
+    this.aircraft = this.aircraft.filter(ac => !this.isUserCallsign(ac.callsign));
+    const removed = before - this.aircraft.length;
+    if (removed > 0) this.log('WORLD', `Removed ${removed} AI aircraft using the user's callsign.`, { userCallsigns:[...this.userCallsigns] });
+  }
+
+  setUserPriority(ms, reason='user transmission') {
+    const hold = Math.max(1500, Number(ms || this.config.userPriorityHoldMs || 9000));
+    this.userPriorityUntil = Math.max(this.userPriorityUntil || 0, Date.now() + hold);
+    this.log('WORLD', `User priority hold active: ${reason}`, { until:this.userPriorityUntil, holdMs:hold });
+  }
+
+  setUserPtt(active, ms) {
+    this.userPttActive = !!active;
+    if (active) this.setUserPriority(ms || this.config.userPttHoldMs || 4500, 'PTT active');
   }
 
   log(type, text, data={}) {
@@ -36,6 +81,7 @@ class TrafficOrchestrator extends EventEmitter {
 
   processRadioQueue(force=false) {
     const now = Date.now();
+    if (!force && this.oneWorldMode && (this.userPttActive || now < this.userPriorityUntil)) return;
     if (!force && now - this.lastRadioAt < this.radioMinGapMs) return;
     const ev = this.radioQueue.shift();
     if (!ev) return;
@@ -49,10 +95,11 @@ class TrafficOrchestrator extends EventEmitter {
   start(opts={}) {
     this.stop();
     this.airport = opts.airport || this.airport;
+    if (opts.userCallsign || opts.callsign || opts.flightCallsign) this.setUserAircraft({ callsign: opts.userCallsign || opts.callsign || opts.flightCallsign, origin: opts.origin || this.airport, dest: opts.dest, runway: opts.runway });
     const requestedDensity = Number(opts.density || this.density || 1);
     const maxDensity = Number(this.config.maxTrafficDensity || 2);
     this.density = Math.max(1, Math.min(requestedDensity, maxDensity));
-    this.aircraft = spawnFromSchedules(this.schedules, this.routes, this.airlineRegistry, { density: this.density });
+    this.aircraft = spawnFromSchedules(this.schedules, this.routes, this.airlineRegistry, { density: this.density, excludeCallsigns: [...this.userCallsigns] });
     this.running = true;
     this.lastRadioAt = 0;
     this.radioQueue = [];
@@ -68,12 +115,13 @@ class TrafficOrchestrator extends EventEmitter {
     this.aircraft = []; this.radioQueue = [];
   }
 
-  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, radioMinGapMs:this.radioMinGapMs, logs:this.logs.slice(0,50) }; }
+  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, radioMinGapMs:this.radioMinGapMs, oneWorldMode:this.oneWorldMode, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, logs:this.logs.slice(0,50) }; }
   adsb() { return { type:'adsb_update', aircraft:this.aircraft.map(adsbPacket) }; }
 
   tick() {
     const now = Date.now();
     this.processRadioQueue();
+    this.removeUserAircraftFromTraffic();
     this.arrivalSequencer.update(this.aircraft);
     for (const ac of this.aircraft) {
       updateKinematics(ac, 1);
