@@ -1,0 +1,23 @@
+airport_icao,type,id,name,lat,lon,heading,runway,length_ft
+TKPK,runway,07,Runway 07,17.3060,-62.7220,070,07,7600
+TKPK,runway,25,Runway 25,17.3140,-62.7040,250,25,7600
+TKPK,taxiway,A,Alpha,17.3090,-62.7150,,,
+TKPK,holdshort,A_07,Hold Short A Runway 07,17.3070,-62.7200,,07,
+TKPK,gate,G1,Gate 1,17.3110,-62.7160,,,
+TKPK,ramp,GA,General Aviation Ramp,17.3120,-62.7180,,,
+TKPK,fbo,FBO,Private FBO,17.3130,-62.7190,,,
+TAPA,runway,07,Runway 07,17.1320,-61.7920,070,07,9000
+TAPA,runway,25,Runway 25,17.1420,-61.7740,250,25,9000
+TAPA,taxiway,A,Alpha,17.1360,-61.7830,,,
+TAPA,holdshort,A_07,Hold Short A Runway 07,17.1330,-61.7900,,07,
+TAPA,gate,G1,Gate 1,17.1370,-61.7850,,,
+TAPA,ramp,GA,General Aviation Ramp,17.1380,-61.7860,,,
+TJSJ,runway,07,Runway 07,18.4390,-66.0100,070,10000
+TJSJ,runway,25,Runway 25,18.4480,-65.9910,250,25,10000
+TJSJ,taxiway,A,Alpha,18.4430,-66.0000,,,
+TJSJ,holdshort,A_07,Hold Short A Runway 07,18.4400,-66.0080,,07,
+TNCM,runway,10,Runway 10,18.0410,-63.1180,100,10,7546
+TNCM,runway,28,Runway 28,18.0400,-63.1030,280,28,7546
+TNCM,taxiway,A,Alpha,18.0410,-63.1100,,,
+TKPN,runway,10,Runway 10,17.2050,-62.5900,100,10,4000
+TKPN,runway,28,Runway 28,17.2040,-62.5820,280,28,4000

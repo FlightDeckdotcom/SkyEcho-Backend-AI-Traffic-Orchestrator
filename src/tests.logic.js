@@ -1,0 +1,11 @@
+const assert = require('assert');
+const { buildAirlineRegistry } = require('./csv/airlineParser');
+const { spokenCallsign } = require('./atc/CallsignFormatter');
+const { resolveIntent } = require('./atc/IntentResolver');
+const airlines = buildAirlineRegistry([{code:'BWA', callsign:'Caribbean Airlines'}]);
+assert.strictEqual(spokenCallsign('BWA268', airlines), 'Caribbean Airlines two six eight');
+assert.strictEqual(spokenCallsign('N1560', airlines), 'November one five six zero');
+assert.strictEqual(resolveIntent('established on the G633').intent, 'established_on_route');
+assert.strictEqual(resolveIntent('established localizer runway 07').intent, 'established_final_or_ils');
+assert.strictEqual(resolveIntent('clear of runway 07 request taxi to the FBO').intent, 'request_taxi_in');
+console.log('SkyEcho backend logic tests passed');

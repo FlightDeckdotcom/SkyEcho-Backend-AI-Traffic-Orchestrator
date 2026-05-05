@@ -1,0 +1,18 @@
+{
+  "name": "skyecho-backend-v1-ai-traffic-orchestrator",
+  "version": "1.0.0",
+  "description": "SkyEchoCabin Backend AI Traffic Orchestrator with CSV world data, sequencing, ADS-B websocket stream, and ATC radio event queue.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && find src -name '*.js' -not -path 'src/index.js' -print0 | xargs -0 -n1 node --check",
+    "test:logic": "node src/tests.logic.js"
+  },
+  "engines": { "node": "20.x" },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.3",
+    "ws": "^8.18.0"
+  }
+}

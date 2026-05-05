@@ -1,0 +1,12 @@
+code,callsign,region,type
+BWA,Caribbean Airlines,caribbean,airline
+IWY,InterCaribbean,caribbean,airline
+LIA,LIAT,caribbean,airline
+SLW,Silverwings,caribbean,charter
+CWG,Caribbean Wings,caribbean,charter
+JBU,JetBlue,global,airline
+BAW,Speedbird,global,airline
+DAL,Delta,global,airline
+UAL,United,global,airline
+KLM,KLM,global,airline
+N,November,global,general_aviation
