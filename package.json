@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-8-frequency-scoped-ai-traffic",
-  "version": "1.8.0",
-  "description": "SkyEcho Backend v1.8 frequency-scoped AI traffic synchronized to user ATC phase and frequency",
+  "name": "skyecho-backend-v1-9-ai-atc-bridge",
+  "version": "1.9.0",
+  "description": "SkyEcho Backend v1.9 AI traffic requests routed through frontend SkyEchoCabin ATC before AI readback",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

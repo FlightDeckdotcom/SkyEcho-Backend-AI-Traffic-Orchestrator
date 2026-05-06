@@ -47,5 +47,9 @@ module.exports = {
   // It speaks readbacks/position reports only while SkyEchoCabin main ATC owns controller logic.
   aiPilotReadbackOnly: String(process.env.AI_PILOT_READBACK_ONLY || 'true').toLowerCase() !== 'false',
   allowAiPilotRequests: String(process.env.ALLOW_AI_PILOT_REQUESTS || 'false').toLowerCase() === 'true',
-  frontendUserPriorityEndpoint: true
+  frontendUserPriorityEndpoint: true,
+  // v1.9: AI pilots must request through frontend SkyEchoCabin ATC before they read back.
+  aiAtcBridgeRequired: String(process.env.AI_ATC_BRIDGE_REQUIRED || 'true').toLowerCase() !== 'false',
+  aiAtcRequestTimeoutMs: num('AI_ATC_REQUEST_TIMEOUT_MS', 30000),
+  aiAtcMaxPending: num('AI_ATC_MAX_PENDING', 3)
 };

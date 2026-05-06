@@ -36,6 +36,10 @@ class TrafficOrchestrator extends EventEmitter {
     this.userPhase = String(config.userPhase || config.phase || 'preflight').toLowerCase();
     this.userFrequency = String(config.userFrequency || config.frequency || 'clearance').toLowerCase();
     this.userControllerRole = String(config.userControllerRole || config.controllerRole || 'clearance').toLowerCase();
+    this.pendingAiRequests = new Map();
+    this.aiAtcBridgeRequired = config.aiAtcBridgeRequired !== false;
+    this.aiAtcRequestTimeoutMs = Number(config.aiAtcRequestTimeoutMs || 30000);
+    this.aiAtcMaxPending = Number(config.aiAtcMaxPending || 3);
   }
 
   setUserContext(data = {}) {
@@ -167,6 +171,7 @@ class TrafficOrchestrator extends EventEmitter {
     this.running = true;
     this.lastRadioAt = 0;
     this.radioQueue = [];
+    this.pendingAiRequests.clear();
     this.nextGlobalActionAt = Date.now() + this.randomBetween(2500, 6500);
     this.log('SYSTEM', `Backend AI scoped traffic started for ${this.airport}. ${this.aircraft.length} aircraft spawned. scope=${[...this.scopeAirports].join('/') || 'local'} radioEvent=${this.radioEventMinMs}-${this.radioEventMaxMs}ms maxQueue=${this.maxRadioQueue}`);
     this.timer = setInterval(() => this.tick(), opts.tickMs || 1000);
@@ -177,10 +182,10 @@ class TrafficOrchestrator extends EventEmitter {
     if (this.timer) clearInterval(this.timer);
     this.timer = null; this.running = false;
     if (this.aircraft.length) this.log('SYSTEM', 'Backend AI traffic stopped.');
-    this.aircraft = []; this.radioQueue = [];
+    this.aircraft = []; this.radioQueue = []; this.pendingAiRequests.clear();
   }
 
-  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, userPhase:this.userPhase, userControllerRole:this.userControllerRole, userFrequency:this.userFrequency, allowedAiPhases:this.allowedPhasesForUser(), logs:this.logs.slice(0,50) }; }
+  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, userPhase:this.userPhase, userControllerRole:this.userControllerRole, userFrequency:this.userFrequency, allowedAiPhases:this.allowedPhasesForUser(), pendingAiRequests:[...this.pendingAiRequests.values()].map(p=>p.req), aiAtcBridgeRequired:this.aiAtcBridgeRequired, logs:this.logs.slice(0,50) }; }
   adsb() { return { type:'adsb_update', aircraft:this.aircraft.map(adsbPacket) }; }
 
   tick() {
@@ -276,62 +281,161 @@ class TrafficOrchestrator extends EventEmitter {
     return this.radio('pilot', ac, text, { readbackOnly:true, requiresAtcAnswer:false, ...meta });
   }
 
+  requestAiInstruction(ac, intent, requestText, suggestedInstruction, readbackText, nextPhase, meta={}) {
+    const now = Date.now();
+    if (this.pendingAiRequests.size >= this.aiAtcMaxPending) {
+      ac.nextActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
+      this.log('AI_BRIDGE_HOLD', `AI ATC bridge pending limit reached; holding ${ac.spokenCallsign}.`, { pending:this.pendingAiRequests.size, max:this.aiAtcMaxPending });
+      return null;
+    }
+    const id = `${ac.id}-${intent}-${now}`;
+    const req = {
+      type:'ai_pilot_request',
+      requestId:id,
+      callsign:ac.callsign,
+      spokenCallsign:ac.spokenCallsign,
+      phase:ac.phase,
+      intent,
+      frequencyScope:this.allowedPhasesForUser().join(','),
+      userPhase:this.userPhase,
+      userControllerRole:this.userControllerRole,
+      userFrequency:this.userFrequency,
+      origin:ac.origin,
+      dest:ac.dest,
+      runway:ac.assignedRunway || '07',
+      route:ac.route,
+      altitude:ac.assignedAltitude,
+      squawk:ac.squawk,
+      text:requestText,
+      suggestedInstruction,
+      suggestedReadback:readbackText,
+      nextPhase,
+      meta,
+      t:now
+    };
+    ac.pendingRequestId = id;
+    ac.nextActionAt = now + this.aiAtcRequestTimeoutMs;
+    this.pendingAiRequests.set(id, { req, acId:ac.id, createdAt:now, expiresAt:now+this.aiAtcRequestTimeoutMs });
+    this.log('AI_REQUEST', `${ac.spokenCallsign}: ${requestText}`, req);
+    this.emit('ai_pilot_request', req);
+    this.emit('radio', req);
+    return req;
+  }
+
+  async handleAiAtcInstruction(data={}) {
+    const id = data.requestId || data.id;
+    if (!id || !this.pendingAiRequests.has(id)) throw new Error('unknown or expired ai request');
+    const pending = this.pendingAiRequests.get(id);
+    this.pendingAiRequests.delete(id);
+    const ac = this.aircraft.find(a => a.id === pending.acId || a.callsign === data.callsign);
+    if (!ac) throw new Error('AI aircraft no longer active');
+    const instruction = String(data.instruction || data.atcInstruction || data.text || pending.req.suggestedInstruction || '').trim();
+    const readback = String(data.readback || data.aiReadback || pending.req.suggestedReadback || '').trim();
+    if (!instruction || !readback) throw new Error('instruction/readback missing');
+
+    this.internalController(ac, instruction, { frontendAtc:true, requestId:id, intent:pending.req.intent, skyEchoCabinAtc:true });
+    // Apply state only after the frontend SkyEchoCabin ATC bridge has issued the instruction.
+    const nextPhase = data.nextPhase || pending.req.nextPhase;
+    if (nextPhase) ac.phase = nextPhase;
+    ac.lastInstruction = instruction;
+    ac.pendingRequestId = null;
+    ac.nextActionAt = Date.now() + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
+    this.applyInstructionEffects(ac, pending.req.intent, instruction);
+    const ev = this.pilotReadback(ac, readback, { requestId:id, phase:`${pending.req.intent}_readback`, frontendAtc:true });
+    this.log('AI_BRIDGE', `SkyEchoCabin ATC bridged ${pending.req.intent} for ${ac.spokenCallsign}.`, { instruction, readback, nextPhase:ac.phase });
+    return { requestId:id, callsign:ac.callsign, phase:ac.phase, instruction, readback, radio:ev };
+  }
+
+  applyInstructionEffects(ac, intent, instruction='') {
+    const runway = ac.assignedRunway || '07';
+    if (intent === 'takeoff_clearance' || /cleared\s+for\s+takeoff/i.test(instruction)) {
+      this.runwaySequencer.reserve({ airport: ac.origin, runway, aircraftId: ac.id, callsign: ac.callsign, type:'departure', ttlMs:120000 });
+      ac.clearance.takeoffCleared = true; ac.position.groundSpeed = 140; ac.position.verticalSpeed = 1500;
+    }
+    if (intent === 'landing_clearance' || /cleared\s+to\s+land/i.test(instruction)) {
+      this.runwaySequencer.reserve({ airport: ac.dest, runway, aircraftId: ac.id, callsign: ac.callsign, type:'landing', ttlMs:150000 });
+      ac.clearance.landingCleared = true;
+    }
+    if (intent === 'departure_checkin') { this.runwaySequencer.release(ac.origin, runway, ac.id); ac.position.alt = 1500; ac.position.groundSpeed = 220; }
+    if (intent === 'taxi_in') { this.runwaySequencer.release(ac.dest, runway, ac.id); ac.position.alt = 0; ac.position.groundSpeed = 20; }
+  }
+
+  expirePendingRequests(now=Date.now()) {
+    for (const [id, p] of [...this.pendingAiRequests.entries()]) {
+      if (now > p.expiresAt) {
+        this.pendingAiRequests.delete(id);
+        const ac = this.aircraft.find(a => a.id === p.acId);
+        if (ac) { ac.pendingRequestId = null; ac.nextActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs); }
+        this.log('AI_BRIDGE_TIMEOUT', `No SkyEchoCabin ATC instruction returned for ${p.req.spokenCallsign}; request expired.`, { requestId:id, intent:p.req.intent });
+      }
+    }
+  }
+
+  aiTextsFor(ac) {
+    const runway = ac.assignedRunway || '07';
+    const route = ac.route || 'DCT';
+    const alt = ac.assignedAltitude || 7000;
+    const sq = ac.squawk || '1200';
+    const cs = ac.spokenCallsign;
+    switch (ac.phase) {
+      case 'PRE_FLIGHT':
+        return { intent:'ifr_clearance', req:`Clearance, ${cs}, request IFR clearance to ${ac.dest}.`, instr:`${cs}, cleared to ${ac.dest} via ${route}, depart runway ${runway}, climb initially ${alt}, squawk ${sq}.`, rb:`Cleared to ${ac.dest} via ${route}, depart runway ${runway}, climb initially ${alt}, squawk ${sq}, ${cs}.`, next:'PUSHBACK' };
+      case 'PUSHBACK':
+        return { intent:'taxi_clearance', req:`Ground, ${cs}, ready to taxi.`, instr:`${cs}, taxi to runway ${runway} via Alpha, hold short runway ${runway}.`, rb:`Taxi to runway ${runway} via Alpha, hold short runway ${runway}, ${cs}.`, next:'TAXI_OUT' };
+      case 'TAXI_OUT':
+        return { intent:'hold_short_report', req:`Tower, ${cs}, holding short runway ${runway}.`, instr:`${cs}, hold short runway ${runway}, traffic on departure.`, rb:`Holding short runway ${runway}, ${cs}.`, next:'HOLD_SHORT' };
+      case 'HOLD_SHORT':
+        return { intent:'takeoff_clearance', req:`Tower, ${cs}, ready for departure runway ${runway}.`, instr:`${cs}, runway ${runway}, cleared for takeoff, fly runway heading.`, rb:`Cleared for takeoff runway ${runway}, ${cs}.`, next:'TAKEOFF' };
+      case 'TAKEOFF':
+        return { intent:'departure_checkin', req:`Departure, ${cs}, passing one thousand five hundred for ${alt}.`, instr:`${cs}, radar contact, climb and maintain ${alt}, proceed on course.`, rb:`Climb and maintain ${alt}, proceeding on course, ${cs}.`, next:'CLIMB' };
+      case 'CLIMB':
+        return { intent:'enroute_instruction', req:`Center, ${cs}, with you level ${alt}.`, instr:`${cs}, roger, proceed on course, report top of descent.`, rb:`Proceeding on course, ${cs}.`, next:'ENROUTE' };
+      case 'ENROUTE':
+        return { intent:'descent_clearance', req:`Approach, ${cs}, request descent.`, instr:`${cs}, descend and maintain three thousand, expect runway ${runway} approach.`, rb:`Descend and maintain three thousand, expect runway ${runway} approach, ${cs}.`, next:'DESCENT' };
+      case 'DESCENT':
+        return { intent:'approach_clearance', req:`Approach, ${cs}, airport in sight, request visual runway ${runway}.`, instr:`${cs}, cleared visual runway ${runway} approach, report final.`, rb:`Cleared visual runway ${runway} approach, will report final, ${cs}.`, next:'APPROACH' };
+      case 'APPROACH':
+        return { intent:'final_report', req:`Tower, ${cs}, final runway ${runway}.`, instr:`${cs}, continue runway ${runway}, traffic departing.`, rb:`Continuing runway ${runway}, ${cs}.`, next:'FINAL' };
+      case 'FINAL':
+        return { intent:'landing_clearance', req:`Tower, ${cs}, final runway ${runway}.`, instr:`${cs}, runway ${runway}, cleared to land.`, rb:`Cleared to land runway ${runway}, ${cs}.`, next:'LANDING' };
+      case 'LANDING':
+        return { intent:'taxi_in', req:`Ground, ${cs}, clear of runway ${runway}, request taxi to the ramp.`, instr:`${cs}, taxi to the ramp via Alpha.`, rb:`Taxi to the ramp via Alpha, ${cs}.`, next:'TAXI_IN' };
+      case 'TAXI_IN':
+        return { intent:'shutdown', req:`Ramp, ${cs}, on blocks.`, instr:`${cs}, monitor ramp, good day.`, rb:`Monitor ramp, good day, ${cs}.`, next:'SHUTDOWN' };
+      default:
+        return null;
+    }
+  }
+
   stepAircraft(ac, now) {
+    this.expirePendingRequests(now);
+    if (ac.pendingRequestId) return;
     const allowedNow = this.allowedPhasesForUser();
     if (!allowedNow.includes(ac.phase)) {
       ac.nextActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
       return;
     }
+    const data = this.aiTextsFor(ac);
+    if (!data) { ac.nextActionAt = now + this.wait(120000); return; }
+    // Separation guard before asking frontend ATC for runway use.
     const runway = ac.assignedRunway || '07';
-    switch (ac.phase) {
-      case 'PRE_FLIGHT': {
-        ac.clearance.hasInitialClearance = true; ac.phase = 'PUSHBACK'; ac.nextActionAt = now + this.wait(45000);
-        const clearance = Phrase.clearance(ac, ac.route, runway, ac.assignedAltitude, ac.squawk);
-        this.internalController(ac, clearance, { squawkAllowed:true, clearanceIssued:true });
-        this.pilotReadback(ac, `${clearance}, ${ac.spokenCallsign}.`, { phase:'clearance_readback' }); break;
+    if (data.intent === 'takeoff_clearance') {
+      const can = this.runwaySequencer.canUseRunway(ac.origin, runway, ac.id);
+      if (!can.ok) {
+        data.instr = `${ac.spokenCallsign}, hold short runway ${runway}, traffic ${can.existing.callsign} using the runway.`;
+        data.rb = `Holding short runway ${runway}, ${ac.spokenCallsign}.`;
+        data.next = 'HOLD_SHORT';
       }
-      case 'PUSHBACK': {
-        ac.phase = 'TAXI_OUT'; ac.nextActionAt = now + this.wait(65000);
-        const taxi = Phrase.taxiOut(ac, runway, 'Alpha');
-        this.internalController(ac, taxi, { squawkAllowed:false, taxiIssued:true });
-        this.pilotReadback(ac, `Taxi to runway ${runway} via Alpha, hold short runway ${runway}, ${ac.spokenCallsign}.`, { phase:'taxi_readback' }); break;
-      }
-      case 'TAXI_OUT': {
-        ac.phase = 'HOLD_SHORT'; ac.nextActionAt = now + this.wait(50000);
-        this.pilotReadback(ac, `${ac.spokenCallsign}, holding short runway ${runway}.`, { phase:'holding_short_report' }); break;
-      }
-      case 'HOLD_SHORT': {
-        const can = this.runwaySequencer.canUseRunway(ac.origin, runway, ac.id);
-        if (!can.ok) {
-          ac.nextActionAt = now + this.wait(45000);
-          const hold = Phrase.holdShort(ac, runway, `Traffic ${can.existing.callsign} using the runway`);
-          this.internalController(ac, hold, { runwayBlocked:true });
-          this.pilotReadback(ac, `Holding short runway ${runway}, ${ac.spokenCallsign}.`, { phase:'hold_short_readback' }); break;
-        }
-        this.runwaySequencer.reserve({ airport: ac.origin, runway, aircraftId: ac.id, callsign: ac.callsign, type:'departure', ttlMs: 120000 });
-        ac.clearance.takeoffCleared = true; ac.phase = 'TAKEOFF'; ac.position.groundSpeed = 140; ac.position.verticalSpeed = 1500; ac.nextActionAt = now + this.wait(50000);
-        const takeoff = Phrase.takeoff(ac, runway);
-        this.internalController(ac, takeoff, { squawkAllowed:false, runwayReserved:true });
-        this.pilotReadback(ac, `Cleared for takeoff runway ${runway}, ${ac.spokenCallsign}.`, { phase:'takeoff_readback' }); break;
-      }
-      case 'TAKEOFF': {
-        this.runwaySequencer.release(ac.origin, runway, ac.id); ac.phase = 'CLIMB'; ac.position.alt = 1500; ac.position.groundSpeed = 220; ac.nextActionAt = now + this.wait(90000);
-        this.pilotReadback(ac, `${ac.spokenCallsign}, passing one thousand five hundred for ${ac.assignedAltitude}.`, { phase:'departure_checkin' }); break;
-      }
-      case 'CLIMB': { ac.phase = 'ENROUTE'; ac.position.alt = ac.assignedAltitude; ac.position.verticalSpeed = 0; ac.position.groundSpeed = 280; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, radar contact, proceed on course.`); this.pilotReadback(ac, `Proceeding on course, ${ac.spokenCallsign}.`, { phase:'course_readback' }); break; }
-      case 'ENROUTE': { ac.phase = 'DESCENT'; ac.position.verticalSpeed = -700; ac.distanceToAirportNm = 25; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, descend and maintain three thousand, expect runway ${runway} approach.`); this.pilotReadback(ac, `Descend and maintain three thousand, expect runway ${runway} approach, ${ac.spokenCallsign}.`, { phase:'descent_readback' }); break; }
-      case 'DESCENT': { ac.phase = 'APPROACH'; ac.distanceToAirportNm = 8; ac.position.alt = 3000; ac.position.groundSpeed = 180; ac.nextActionAt = now + this.wait(70000); this.internalController(ac, `${ac.spokenCallsign}, cleared visual runway ${runway} approach, report final.`, { squawkAllowed:false }); this.pilotReadback(ac, `Cleared visual runway ${runway} approach, will report final, ${ac.spokenCallsign}.`, { phase:'approach_readback' }); break; }
-      case 'APPROACH': { ac.phase = 'FINAL'; ac.distanceToAirportNm = 4; ac.nextActionAt = now + this.wait(60000); this.pilotReadback(ac, `${ac.spokenCallsign}, final runway ${runway}.`, { phase:'final_report' }); break; }
-      case 'FINAL': {
-        const can = this.runwaySequencer.canUseRunway(ac.dest, runway, ac.id);
-        if (!can.ok) { ac.nextActionAt = now + this.wait(30000); const cont = Phrase.continueFinal(ac, runway, `traffic ${can.existing.callsign} on the runway`); this.internalController(ac, cont); this.pilotReadback(ac, `Continuing final runway ${runway}, ${ac.spokenCallsign}.`, { phase:'continue_final_readback' }); break; }
-        this.runwaySequencer.reserve({ airport: ac.dest, runway, aircraftId: ac.id, callsign: ac.callsign, type:'landing', ttlMs: 150000 });
-        ac.phase = 'LANDING'; ac.clearance.landingCleared = true; ac.nextActionAt = now + this.wait(55000); const land = Phrase.land(ac, runway); this.internalController(ac, land, { squawkAllowed:false, runwayReserved:true }); this.pilotReadback(ac, `Cleared to land runway ${runway}, ${ac.spokenCallsign}.`, { phase:'landing_readback' }); break;
-      }
-      case 'LANDING': { this.runwaySequencer.release(ac.dest, runway, ac.id); ac.phase = 'TAXI_IN'; ac.position.groundSpeed = 20; ac.position.alt = 0; ac.nextActionAt = now + this.wait(70000); const taxiIn = Phrase.taxiIn(ac, 'ramp', 'Alpha'); this.internalController(ac, taxiIn, { squawkAllowed:false }); this.pilotReadback(ac, `Taxi to the ramp via Alpha, ${ac.spokenCallsign}.`, { phase:'taxi_in_readback' }); break; }
-      case 'TAXI_IN': { ac.phase = 'SHUTDOWN'; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, monitor ramp, good day.`); this.pilotReadback(ac, `Monitor ramp, good day, ${ac.spokenCallsign}.`, { phase:'ramp_readback' }); break; }
-      default: ac.nextActionAt = now + this.wait(120000);
     }
+    if (data.intent === 'landing_clearance') {
+      const can = this.runwaySequencer.canUseRunway(ac.dest, runway, ac.id);
+      if (!can.ok) {
+        data.instr = `${ac.spokenCallsign}, continue runway ${runway}, traffic ${can.existing.callsign} on the runway.`;
+        data.rb = `Continuing final runway ${runway}, ${ac.spokenCallsign}.`;
+        data.next = 'FINAL';
+      }
+    }
+    this.requestAiInstruction(ac, data.intent, data.req, data.instr, data.rb, data.next, { phase:ac.phase, frequencyScope:this.userControllerRole });
   }
 }
 module.exports = { TrafficOrchestrator };
