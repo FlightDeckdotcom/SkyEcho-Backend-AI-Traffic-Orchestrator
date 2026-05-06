@@ -19,6 +19,15 @@ class TrafficOrchestrator extends EventEmitter {
     this.lastRadioAt = 0;
     this.radioMinGapMs = Number(config.radioMinGapMs || 11000);
     this.phaseScale = Number(config.aiPhaseScale || 2.5);
+    this.radioEventMinMs = Number(config.radioEventMinMs || 20000);
+    this.radioEventMaxMs = Math.max(this.radioEventMinMs, Number(config.radioEventMaxMs || 45000));
+    this.maxRadioQueue = Number(config.maxRadioQueue || 8);
+    this.minSessionAircraft = Number(config.aiSessionAircraftMin || 3);
+    this.maxSessionAircraft = Number(config.aiSessionAircraftMax || 7);
+    this.nextGlobalActionAt = 0;
+    this.scopeAirports = new Set();
+    this.getClientCount = typeof config.getClientCount === 'function' ? config.getClientCount : (() => 1);
+    this.pausedForNoClients = false;
     this.oneWorldMode = config.oneWorldMode !== false;
     this.userCallsigns = new Set(String(config.userCallsigns || '').split(',').map(normalizeCallsign).filter(Boolean));
     this.userAircraft = null;
@@ -72,8 +81,27 @@ class TrafficOrchestrator extends EventEmitter {
   }
 
   radio(role, aircraft, text, meta={}) {
-    const ev = { type:'radio', role, callsign: aircraft.callsign, spokenCallsign: aircraft.spokenCallsign, text, meta, queuedAt: Date.now(), t: Date.now() };
+    const nextMeta = { ...(meta || {}) };
+    if (role === 'atc') {
+      nextMeta.controllerScope = nextMeta.controllerScope || 'ai_traffic';
+      nextMeta.silentController = this.oneWorldMode && this.config.trafficAtcAudio !== true;
+    }
+    // v1.6: in single-controller mode, backend ATC for AI traffic is internal only.
+    // Do not queue it for audio at all. Main SkyEchoCabin ATC remains the audible controller.
+    if (role === 'atc' && nextMeta.silentController) {
+      const internal = { type:'controller_internal', role, callsign:aircraft.callsign, spokenCallsign:aircraft.spokenCallsign, text, meta:nextMeta, t:Date.now() };
+      this.log('INTERNAL_ATC', text, internal);
+      this.emit('radio', internal);
+      return internal;
+    }
+
+    const ev = { type:'radio', role, callsign: aircraft.callsign, spokenCallsign: aircraft.spokenCallsign, text, meta: nextMeta, queuedAt: Date.now(), t: Date.now() };
     this.radioQueue.push(ev);
+    if (this.radioQueue.length > this.maxRadioQueue) {
+      const overflow = this.radioQueue.length - this.maxRadioQueue;
+      this.radioQueue.splice(0, overflow);
+      this.log('QUEUE', `Dropped ${overflow} stale radio items; max queue ${this.maxRadioQueue}.`, { maxRadioQueue:this.maxRadioQueue });
+    }
     this.log('QUEUE', `${role.toUpperCase()} queued: ${text}`, { callsign: aircraft.callsign, role, queueDepth:this.radioQueue.length, meta });
     this.processRadioQueue();
     return ev;
@@ -81,7 +109,17 @@ class TrafficOrchestrator extends EventEmitter {
 
   processRadioQueue(force=false) {
     const now = Date.now();
-    if (!force && this.oneWorldMode && (this.userPttActive || now < this.userPriorityUntil)) return;
+    if (!force && this.oneWorldMode && (this.userPttActive || now < this.userPriorityUntil)) {
+      if (this.config.dropTrafficAudioDuringUserPriority) {
+        // Drop pending AI pilot/controller chatter while the real user has the frequency.
+        // This prevents stale AI calls from playing over or immediately after the user.
+        const before = this.radioQueue.length;
+        this.radioQueue = this.radioQueue.filter(ev => ev.meta && ev.meta.mustKeep);
+        const dropped = before - this.radioQueue.length;
+        if (dropped > 0) this.log('WORLD', `Dropped ${dropped} queued AI radio items during user priority window.`, { userPriorityUntil:this.userPriorityUntil });
+      }
+      return;
+    }
     if (!force && now - this.lastRadioAt < this.radioMinGapMs) return;
     const ev = this.radioQueue.shift();
     if (!ev) return;
@@ -96,14 +134,24 @@ class TrafficOrchestrator extends EventEmitter {
     this.stop();
     this.airport = opts.airport || this.airport;
     if (opts.userCallsign || opts.callsign || opts.flightCallsign) this.setUserAircraft({ callsign: opts.userCallsign || opts.callsign || opts.flightCallsign, origin: opts.origin || this.airport, dest: opts.dest, runway: opts.runway });
-    const requestedDensity = Number(opts.density || this.density || 1);
-    const maxDensity = Number(this.config.maxTrafficDensity || 2);
-    this.density = Math.max(1, Math.min(requestedDensity, maxDensity));
-    this.aircraft = spawnFromSchedules(this.schedules, this.routes, this.airlineRegistry, { density: this.density, excludeCallsigns: [...this.userCallsigns] });
+    const requestedDensity = Number(opts.density || this.density || this.minSessionAircraft);
+    const maxDensity = Number(this.config.maxTrafficDensity || this.maxSessionAircraft);
+    this.density = Math.max(this.minSessionAircraft, Math.min(requestedDensity, maxDensity, this.maxSessionAircraft));
+    this.scopeAirports = this.buildScopeAirports(opts);
+    this.aircraft = spawnFromSchedules(this.schedules, this.routes, this.airlineRegistry, {
+      density: this.density,
+      minAircraft: this.minSessionAircraft,
+      maxAircraft: this.maxSessionAircraft,
+      targetCount: this.density,
+      scopeAirports: [...this.scopeAirports],
+      excludeCallsigns: [...this.userCallsigns]
+    });
+    this.removeUserAircraftFromTraffic();
     this.running = true;
     this.lastRadioAt = 0;
     this.radioQueue = [];
-    this.log('SYSTEM', `Backend AI traffic started for ${this.airport}. ${this.aircraft.length} aircraft spawned. radioMinGap=${this.radioMinGapMs}ms phaseScale=${this.phaseScale}`);
+    this.nextGlobalActionAt = Date.now() + this.randomBetween(2500, 6500);
+    this.log('SYSTEM', `Backend AI scoped traffic started for ${this.airport}. ${this.aircraft.length} aircraft spawned. scope=${[...this.scopeAirports].join('/') || 'local'} radioEvent=${this.radioEventMinMs}-${this.radioEventMaxMs}ms maxQueue=${this.maxRadioQueue}`);
     this.timer = setInterval(() => this.tick(), opts.tickMs || 1000);
     return this.snapshot();
   }
@@ -115,22 +163,55 @@ class TrafficOrchestrator extends EventEmitter {
     this.aircraft = []; this.radioQueue = [];
   }
 
-  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, radioMinGapMs:this.radioMinGapMs, oneWorldMode:this.oneWorldMode, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, logs:this.logs.slice(0,50) }; }
+  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, logs:this.logs.slice(0,50) }; }
   adsb() { return { type:'adsb_update', aircraft:this.aircraft.map(adsbPacket) }; }
 
   tick() {
     const now = Date.now();
+    if (this.config.autoPauseNoClients && this.getClientCount() <= 0) {
+      if (!this.pausedForNoClients) this.log('SYSTEM', 'AI traffic paused: no frontend clients connected.');
+      this.pausedForNoClients = true;
+      return;
+    }
+    if (this.pausedForNoClients) this.log('SYSTEM', 'AI traffic resumed: frontend client connected.');
+    this.pausedForNoClients = false;
+
     this.processRadioQueue();
     this.removeUserAircraftFromTraffic();
     this.arrivalSequencer.update(this.aircraft);
-    for (const ac of this.aircraft) {
-      updateKinematics(ac, 1);
-      if (now >= ac.nextActionAt) this.stepAircraft(ac, now);
+
+    // Lightweight radio-event mode: no full-world sim loop. Only update light
+    // kinematics and choose one scoped aircraft every 20-45 seconds.
+    for (const ac of this.aircraft) updateKinematics(ac, 1);
+    if (now >= this.nextGlobalActionAt && this.radioQueue.length < this.maxRadioQueue) {
+      const ac = this.chooseValidAircraft(now);
+      if (ac) this.stepAircraft(ac, now);
+      this.nextGlobalActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
     }
     this.emit('adsb', this.adsb());
   }
 
   wait(ms) { return scaled(ms, this.phaseScale); }
+  randomBetween(min, max) { return Math.round(Number(min) + Math.random() * Math.max(0, Number(max) - Number(min))); }
+
+  buildScopeAirports(opts={}) {
+    const set = new Set();
+    const add = v => { String(v || '').split(/[\s,;>]+/).map(x=>x.trim().toUpperCase()).filter(Boolean).forEach(x => { if (/^[A-Z0-9]{3,4}$/.test(x)) set.add(x); }); };
+    add(opts.airport || this.airport);
+    add(opts.origin);
+    add(opts.dest || opts.destination);
+    add(opts.route);
+    add(opts.flightPlanAirports);
+    if (this.userAircraft) { add(this.userAircraft.origin); add(this.userAircraft.dest); }
+    return set;
+  }
+
+  chooseValidAircraft(now) {
+    const candidates = this.aircraft.filter(ac => !this.isUserCallsign(ac.callsign));
+    if (!candidates.length) return null;
+    candidates.sort((a,b) => (a.nextActionAt || 0) - (b.nextActionAt || 0));
+    return candidates.find(ac => now >= (ac.nextActionAt || 0)) || candidates[0];
+  }
 
   stepAircraft(ac, now) {
     const runway = ac.assignedRunway || '07';

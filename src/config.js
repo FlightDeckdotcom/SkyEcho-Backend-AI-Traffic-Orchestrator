@@ -27,5 +27,20 @@ module.exports = {
   userCallsigns: process.env.USER_CALLSIGNS || process.env.USER_CALLSIGN || 'BWA268,N23566',
   userPriorityHoldMs: num('USER_PRIORITY_HOLD_MS', 9000),
   userPttHoldMs: num('USER_PTT_HOLD_MS', 4500),
-  oneWorldMode: String(process.env.ONE_WORLD_MODE || 'true').toLowerCase() !== 'false'
+  oneWorldMode: String(process.env.ONE_WORLD_MODE || 'true').toLowerCase() !== 'false',
+  // v1.5: SkyEchoCabin main ATC owns the controller voice. Backend AI traffic controller responses are internal by default.
+  trafficAtcAudio: String(process.env.TRAFFIC_ATC_AUDIO || 'false').toLowerCase() === 'true',
+  aiPilotAudio: String(process.env.AI_PILOT_AUDIO || 'true').toLowerCase() !== 'false',
+  dropTrafficAudioDuringUserPriority: String(process.env.DROP_TRAFFIC_AUDIO_DURING_USER_PRIORITY || 'true').toLowerCase() !== 'false',
+
+  // v1.6 lightweight scoped session mode
+  aiSessionAircraftMin: num('AI_SESSION_AIRCRAFT_MIN', 3),
+  aiSessionAircraftMax: num('AI_SESSION_AIRCRAFT_MAX', 7),
+  radioEventMinMs: num('RADIO_EVENT_MIN_MS', 20000),
+  radioEventMaxMs: num('RADIO_EVENT_MAX_MS', 45000),
+  maxRadioQueue: num('MAX_RADIO_QUEUE', 8),
+  maxAudioFiles: num('MAX_AUDIO_FILES', 10),
+  audioRetentionMs: num('AUDIO_RETENTION_MS', 60000),
+  autoPauseNoClients: String(process.env.AUTO_PAUSE_NO_CLIENTS || 'true').toLowerCase() !== 'false',
+  scopedTrafficOnly: String(process.env.SCOPED_TRAFFIC_ONLY || 'true').toLowerCase() !== 'false'
 };

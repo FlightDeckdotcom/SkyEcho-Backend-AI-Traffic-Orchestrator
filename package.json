@@ -1,6 +1,6 @@
 {
-  "name": "skyecho-backend-v1-4-one-world-traffic-engine",
-  "version": "1.4.0",
+  "name": "skyecho-backend-v1-6-lightweight-scoped-radio-world",
+  "version": "1.6.0",
   "description": "SkyEcho Backend v1.3 backend voice router, AI traffic radio pacing, Piper role routing",
   "main": "src/index.js",
   "scripts": {

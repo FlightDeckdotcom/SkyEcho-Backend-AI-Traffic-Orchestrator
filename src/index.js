@@ -44,23 +44,29 @@ async function main() {
   const arrivalSequencer = new ArrivalSequencer();
   let groundSequencer = new GroundSequencer({ airports });
   const voiceRouter = new VoiceRouter({ config, broadcast, log: (msg) => console.log(msg) });
-  const traffic = new TrafficOrchestrator({ schedules, routes, airlineRegistry, runwaySequencer, arrivalSequencer, groundSequencer, config, voiceRouter });
+  const trafficConfig = { ...config, getClientCount: () => clients.size };
+  const traffic = new TrafficOrchestrator({ schedules, routes, airlineRegistry, runwaySequencer, arrivalSequencer, groundSequencer, config: trafficConfig, voiceRouter });
   const atc = new AtcEngine({ runwaySequencer, airlineRegistry });
 
-  wss.on('connection', (ws) => { clients.add(ws); ws.send(JSON.stringify({ type:'hello', service:'skyecho-backend-v1.4-one-world', traffic: traffic.snapshot(), data: { source: navData.source, counts: navData.counts, errors: navData.errors.slice(0,8) } })); ws.on('close', () => clients.delete(ws)); });
+  wss.on('connection', (ws) => { clients.add(ws); ws.send(JSON.stringify({ type:'hello', service:'skyecho-backend-v1.6-lightweight-scoped-radio', traffic: traffic.snapshot(), data: { source: navData.source, counts: navData.counts, errors: navData.errors.slice(0,8) } })); ws.on('close', () => clients.delete(ws)); });
   traffic.on('log', entry => broadcast({ type:'log', entry }));
   traffic.on('radio', ev => broadcast({ type:'radio', event: ev }));
   traffic.on('adsb', packet => broadcast(packet));
 
-  app.get('/', (req,res)=>res.json({ ok:true, service:'SkyEcho Backend v1.4 One-World AI Traffic Voice + Pacing Orchestrator', ws:'/ws', health:'/health', dataStatus:'/data/status', sync:'/data/sync' }));
-  app.get('/health', (req,res)=>res.json({ ok:true, version:'1.4.0', airports:airports.size, airlines:airlineRegistry.size, navSource:navData.source, navFilesLoaded:Object.values(navData.counts).filter(n=>n>0).length, running:traffic.running, clients:clients.size, oneWorldMode:traffic.oneWorldMode, userCallsigns:traffic.snapshot().userCallsigns, userPriorityActive:traffic.snapshot().userPriorityActive }));
-  app.get('/data/status', (req,res)=>res.json({ ok:true, version:'1.4.0', source:navData.source, baseUrl:config.navDataBaseUrl, counts:navData.counts, loadedFiles:navData.loadedFiles, errors:navData.errors, normalizedAirportRows:airportRows.length, airportDbSize:airports.size, availableFiles:FILES }));
+  app.get('/', (req,res)=>res.json({ ok:true, service:'SkyEcho Backend v1.6 Lightweight Scoped Radio Traffic Orchestrator', ws:'/ws', health:'/health', dataStatus:'/data/status', sync:'/data/sync' }));
+  app.get('/health', (req,res)=>res.json({ ok:true, version:'1.6.0', airports:airports.size, airlines:airlineRegistry.size, navSource:navData.source, navFilesLoaded:Object.values(navData.counts).filter(n=>n>0).length, running:traffic.running, clients:clients.size, oneWorldMode:traffic.oneWorldMode, userCallsigns:traffic.snapshot().userCallsigns, userPriorityActive:traffic.snapshot().userPriorityActive }));
+  app.get('/data/status', (req,res)=>res.json({ ok:true, version:'1.6.0', source:navData.source, baseUrl:config.navDataBaseUrl, counts:navData.counts, loadedFiles:navData.loadedFiles, errors:navData.errors, normalizedAirportRows:airportRows.length, airportDbSize:airports.size, availableFiles:FILES }));
   app.post('/data/sync', requireSecret, async (req,res)=>{
     const mode = req.body?.mode || 'boot';
     const files = Array.isArray(req.body?.files) && req.body.files.length ? req.body.files : (mode === 'full' ? FILES : BOOT_FILES);
     try {
       const next = await loadNavData({ dataDir, baseUrl: config.navDataBaseUrl || DEFAULT_NAVDATA_BASE_URL, preferRemote:true, files, timeoutMs: Number(req.body?.timeoutMs || 12000), maxBytes: Number(req.body?.maxBytes || 6000000) });
-      const nextAirportRows = normalizeAirportRows(next);
+      let nextAirportRows = normalizeAirportRows(next);
+      const scopeList = Array.isArray(req.body?.airports) ? req.body.airports.map(x=>String(x).toUpperCase()) : [];
+      if (scopeList.length) {
+        const scopeSet = new Set(scopeList);
+        nextAirportRows = nextAirportRows.filter(r => scopeSet.has(String(r.airport_icao || '').toUpperCase()));
+      }
       if (nextAirportRows.length) {
         navData = next;
         airportRows = nextAirportRows;
@@ -81,7 +87,7 @@ async function main() {
   app.post('/traffic/user-state', requireSecret, (req,res)=>{ const body=req.body||{}; const user=traffic.setUserAircraft(body); if (body.pttActive || body.transmitting) traffic.setUserPtt(true, body.holdMs || config.userPttHoldMs); if (body.priorityHold) traffic.setUserPriority(body.holdMs || config.userPriorityHoldMs, body.reason || 'user state'); const out={ ok:true, userAircraft:user, snapshot:traffic.snapshot() }; broadcast({ type:'user_state', ...out }); res.json(out); });
   app.get('/traffic/logs', (req,res)=>res.json({ ok:true, logs:traffic.logs }));
   app.get('/traffic/adsb', (req,res)=>res.json({ ok:true, ...traffic.adsb() }));
-  app.get('/voice/status', (req,res)=>res.json({ ok:true, piperEnabled:config.piperEnabled, radioMinGapMs:config.radioMinGapMs, aiPhaseScale:config.aiPhaseScale, maxTrafficDensity:config.maxTrafficDensity, atcVoice:config.atcPiperVoice, trafficVoicePool:config.trafficPiperVoicePool, cabinVoice:config.cabinPiperVoice, discordBridgeUrl: config.discordBridgeUrl ? 'configured' : 'not configured' }));
+  app.get('/voice/status', (req,res)=>res.json({ ok:true, piperEnabled:config.piperEnabled, radioMinGapMs:config.radioMinGapMs, aiPhaseScale:config.aiPhaseScale, maxTrafficDensity:config.maxTrafficDensity, atcVoice:config.atcPiperVoice, trafficVoicePool:config.trafficPiperVoicePool, cabinVoice:config.cabinPiperVoice, discordBridgeUrl: config.discordBridgeUrl ? 'configured' : 'not configured', trafficAtcAudio: config.trafficAtcAudio, aiPilotAudio: config.aiPilotAudio }));
   app.post('/voice/test', requireSecret, async (req,res)=>{ const body=req.body||{}; const role=body.role||'traffic'; const ac={ callsign:body.callsign||'BWA268', spokenCallsign:body.spokenCallsign||spokenCallsign(body.callsign||'BWA268', airlineRegistry) }; const ev={ type:'radio', role: role==='atc'?'atc':'pilot', callsign:ac.callsign, spokenCallsign:ac.spokenCallsign, text: body.text || `${ac.spokenCallsign}, radio check.`, meta:{ test:true }, t:Date.now() }; const out = await voiceRouter.routeRadio(ev); res.json({ ok:true, voice:out }); });
   app.get('/traffic/airports', (req,res)=>res.json({ ok:true, airports:Array.from(airports.values()).slice(0,500) }));
   app.post('/traffic/start', requireSecret, (req,res)=>{ const out = traffic.start({ airport:req.body.airport || config.defaultAirport, density:req.body.density || config.defaultDensity, userCallsign:req.body.userCallsign || req.body.callsign, origin:req.body.origin, dest:req.body.dest, runway:req.body.runway, tickMs:config.tickMs }); broadcast({ type:'traffic_started', state:out }); res.json({ ok:true, state:out }); });
@@ -97,6 +103,6 @@ async function main() {
     }
     traffic.log('BRIDGE', event.text || event.type || 'bridge event', event); broadcast({ type:'bridge_event', event }); res.json({ ok:true, snapshot:traffic.snapshot() }); });
 
-  server.listen(config.port, () => console.log(`SkyEcho Backend v1.4 listening on ${config.port}; ONE-WORLD+VOICE+PACING; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
+  server.listen(config.port, () => console.log(`SkyEcho Backend v1.6 listening on ${config.port}; LIGHTWEIGHT-SCOPED-RADIO+SINGLE-CONTROLLER; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
 }
 main().catch(err => { console.error('SkyEcho Backend fatal startup error:', err); process.exit(1); });

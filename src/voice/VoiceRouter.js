@@ -20,6 +20,8 @@ class VoiceRouter {
     this.log = log || console.log;
     this.audioDir = path.join(__dirname, '..', '..', 'tmp', 'audio');
     fs.mkdirSync(this.audioDir, { recursive:true });
+    this.audioRetentionMs = Number(config.audioRetentionMs || 60000);
+    this.maxAudioFiles = Number(config.maxAudioFiles || 10);
   }
 
   selectVoice(role, meta={}) {
@@ -37,6 +39,35 @@ class VoiceRouter {
 
   async routeRadio(ev) {
     const role = ev.role === 'atc' ? 'atc' : 'traffic';
+
+    // v1.5 ONE-CONTROLLER RULE:
+    // AI traffic is allowed to speak as pilots, but the audible controller must be the
+    // main SkyEchoCabin ATC engine. Backend ATC responses for AI traffic remain
+    // internal/sequencing-only unless TRAFFIC_ATC_AUDIO=true is explicitly set.
+    const isAiTrafficController = role === 'atc' && ev?.meta?.controllerScope === 'ai_traffic';
+    if (isAiTrafficController && !this.config.trafficAtcAudio) {
+      const internal = {
+        type: 'controller_internal',
+        role: 'atc',
+        silent: true,
+        callsign: ev.callsign,
+        spokenCallsign: ev.spokenCallsign,
+        text: ev.text,
+        reason: 'SkyEchoCabin main ATC controls audible controller channel',
+        t: Date.now()
+      };
+      this.broadcast(internal);
+      this.log(`[VOICE] suppressed backend AI-controller audio role=atc callsign=${ev.callsign || ''} text="${ev.text}"`);
+      return internal;
+    }
+
+    if (role === 'traffic' && this.config.aiPilotAudio === false) {
+      const silent = { type:'traffic_internal', role:'traffic', silent:true, callsign:ev.callsign, text:ev.text, t:Date.now() };
+      this.broadcast(silent);
+      this.log(`[VOICE] suppressed AI pilot audio callsign=${ev.callsign || ''} text="${ev.text}"`);
+      return silent;
+    }
+
     const voice = this.selectVoice(role, ev);
     const payload = {
       type: 'voice',
@@ -64,10 +95,12 @@ class VoiceRouter {
     }
 
     try {
+      this.cleanupAudioFiles();
       const audioUrl = await this.generatePiperWav({ text: ev.text, voice });
       const done = { ...payload, audioUrl, playable:true, type:'voice_audio' };
       this.broadcast(done);
       this.forwardToDiscordBridge(done).catch(err => this.log(`[VOICE] discord audio forward failed: ${err.message}`));
+      this.scheduleDelete(audioUrl);
       this.log(`[VOICE] generated role=${role} voice=${payload.voiceName} ${audioUrl}`);
       return done;
     } catch (err) {
@@ -76,6 +109,30 @@ class VoiceRouter {
       this.log(`[VOICE] Piper failed role=${role} voice=${payload.voiceName}: ${err.message}`);
       return fail;
     }
+  }
+
+  cleanupAudioFiles() {
+    try {
+      const now = Date.now();
+      const files = fs.readdirSync(this.audioDir)
+        .filter(f => f.endsWith('.wav'))
+        .map(f => { const p = path.join(this.audioDir, f); const st = fs.statSync(p); return { f, p, mtime: st.mtimeMs }; })
+        .sort((a,b) => b.mtime - a.mtime);
+      for (const item of files) {
+        const tooOld = now - item.mtime > this.audioRetentionMs;
+        const overflow = files.indexOf(item) >= this.maxAudioFiles;
+        if (tooOld || overflow) { try { fs.unlinkSync(item.p); } catch {} }
+      }
+    } catch {}
+  }
+
+  scheduleDelete(audioUrl) {
+    try {
+      const f = path.basename(String(audioUrl || ''));
+      if (!f.endsWith('.wav')) return;
+      const p = path.join(this.audioDir, f);
+      setTimeout(() => { try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {} }, this.audioRetentionMs);
+    } catch {}
   }
 
   generatePiperWav({ text, voice }) {
