@@ -104,6 +104,6 @@ async function main() {
     }
     traffic.log('BRIDGE', event.text || event.type || 'bridge event', event); broadcast({ type:'bridge_event', event }); res.json({ ok:true, snapshot:traffic.snapshot() }); });
 
-  server.listen(config.port, () => console.log(`SkyEcho Backend v1.7 listening on ${config.port}; ATC-SESSION-SYNC+READBACK-ONLY-AI-TRAFFIC; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
+  server.listen(config.port, () => console.log(`SkyEcho Backend v1.8 listening on ${config.port}; FREQUENCY-SCOPED-AI-TRAFFIC; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
 }
 main().catch(err => { console.error('SkyEcho Backend fatal startup error:', err); process.exit(1); });
