@@ -33,6 +33,8 @@ class TrafficOrchestrator extends EventEmitter {
     this.userAircraft = null;
     this.userPriorityUntil = 0;
     this.userPttActive = false;
+    this.userPttTimer = null;
+    this.radioRetryTimer = null;
     this.userPhase = String(config.userPhase || config.phase || 'preflight').toLowerCase();
     this.userFrequency = String(config.userFrequency || config.frequency || 'clearance').toLowerCase();
     this.userControllerRole = String(config.userControllerRole || config.controllerRole || 'clearance').toLowerCase();
@@ -90,8 +92,30 @@ class TrafficOrchestrator extends EventEmitter {
   }
 
   setUserPtt(active, ms) {
+    const hold = Math.max(1500, Number(ms || this.config.userPttHoldMs || 4500));
+    if (this.userPttTimer) { clearTimeout(this.userPttTimer); this.userPttTimer = null; }
     this.userPttActive = !!active;
-    if (active) this.setUserPriority(ms || this.config.userPttHoldMs || 4500, 'PTT active');
+    if (active) {
+      this.setUserPriority(hold, 'PTT active');
+      // v1.9.1: never let PTT stay latched forever if the frontend only sends a PTT-active event.
+      this.userPttTimer = setTimeout(() => {
+        this.userPttActive = false;
+        this.log('WORLD', 'User PTT auto-released after hold window.', { holdMs: hold });
+        this.processRadioQueue();
+      }, hold + 250);
+    } else {
+      this.log('WORLD', 'User PTT released by frontend.', {});
+      this.processRadioQueue();
+    }
+  }
+
+  scheduleRadioRetry(delayMs=1500) {
+    if (this.radioRetryTimer) return;
+    const delay = Math.max(500, Math.min(Number(delayMs || 1500), 10000));
+    this.radioRetryTimer = setTimeout(() => {
+      this.radioRetryTimer = null;
+      this.processRadioQueue();
+    }, delay);
   }
 
   log(type, text, data={}) {
@@ -130,16 +154,21 @@ class TrafficOrchestrator extends EventEmitter {
     const now = Date.now();
     if (!force && this.oneWorldMode && (this.userPttActive || now < this.userPriorityUntil)) {
       if (this.config.dropTrafficAudioDuringUserPriority) {
-        // Drop pending AI pilot/controller chatter while the real user has the frequency.
-        // This prevents stale AI calls from playing over or immediately after the user.
+        // Drop pending AI pilot/controller chatter only when explicitly requested.
         const before = this.radioQueue.length;
         this.radioQueue = this.radioQueue.filter(ev => ev.meta && ev.meta.mustKeep);
         const dropped = before - this.radioQueue.length;
         if (dropped > 0) this.log('WORLD', `Dropped ${dropped} queued AI radio items during user priority window.`, { userPriorityUntil:this.userPriorityUntil });
+      } else if (this.radioQueue.length) {
+        this.log('WORLD', `AI radio queued but waiting for user priority/PTT release.`, { queueDepth:this.radioQueue.length, userPttActive:this.userPttActive, userPriorityUntil:this.userPriorityUntil });
       }
+      this.scheduleRadioRetry(Math.max(750, (this.userPriorityUntil || now) - now + 350));
       return;
     }
-    if (!force && now - this.lastRadioAt < this.radioMinGapMs) return;
+    if (!force && now - this.lastRadioAt < this.radioMinGapMs) {
+      this.scheduleRadioRetry(this.radioMinGapMs - (now - this.lastRadioAt) + 100);
+      return;
+    }
     const ev = this.radioQueue.shift();
     if (!ev) return;
     ev.t = now;
@@ -341,7 +370,8 @@ class TrafficOrchestrator extends EventEmitter {
     ac.pendingRequestId = null;
     ac.nextActionAt = Date.now() + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
     this.applyInstructionEffects(ac, pending.req.intent, instruction);
-    const ev = this.pilotReadback(ac, readback, { requestId:id, phase:`${pending.req.intent}_readback`, frontendAtc:true });
+    const ev = this.pilotReadback(ac, readback, { requestId:id, phase:`${pending.req.intent}_readback`, frontendAtc:true, mustKeep:true });
+    this.scheduleRadioRetry(750);
     this.log('AI_BRIDGE', `SkyEchoCabin ATC bridged ${pending.req.intent} for ${ac.spokenCallsign}.`, { instruction, readback, nextPhase:ac.phase });
     return { requestId:id, callsign:ac.callsign, phase:ac.phase, instruction, readback, radio:ev };
   }
