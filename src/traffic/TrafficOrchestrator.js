@@ -33,9 +33,24 @@ class TrafficOrchestrator extends EventEmitter {
     this.userAircraft = null;
     this.userPriorityUntil = 0;
     this.userPttActive = false;
+    this.userPhase = String(config.userPhase || config.phase || 'preflight').toLowerCase();
+    this.userFrequency = String(config.userFrequency || config.frequency || 'clearance').toLowerCase();
+    this.userControllerRole = String(config.userControllerRole || config.controllerRole || 'clearance').toLowerCase();
+  }
+
+  setUserContext(data = {}) {
+    const phase = data.phase || data.userPhase || data.flightPhase;
+    const frequency = data.frequency || data.userFrequency || data.activeFrequency;
+    const role = data.controllerRole || data.userControllerRole || data.facility || data.controller || data.radioRole;
+    if (phase) this.userPhase = String(phase).toLowerCase();
+    if (frequency) this.userFrequency = String(frequency).toLowerCase();
+    if (role) this.userControllerRole = String(role).toLowerCase();
+    this.log('WORLD', `User context synced: phase=${this.userPhase} role=${this.userControllerRole} freq=${this.userFrequency}`, { phase:this.userPhase, controllerRole:this.userControllerRole, frequency:this.userFrequency });
+    return { phase:this.userPhase, controllerRole:this.userControllerRole, frequency:this.userFrequency };
   }
 
   setUserAircraft(data = {}) {
+    this.setUserContext(data);
     const callsign = data.callsign || data.userCallsign || data.flightCallsign;
     const norm = normalizeCallsign(callsign);
     if (!norm) return this.userAircraft;
@@ -133,7 +148,8 @@ class TrafficOrchestrator extends EventEmitter {
   start(opts={}) {
     this.stop();
     this.airport = opts.airport || this.airport;
-    if (opts.userCallsign || opts.callsign || opts.flightCallsign) this.setUserAircraft({ callsign: opts.userCallsign || opts.callsign || opts.flightCallsign, origin: opts.origin || this.airport, dest: opts.dest, runway: opts.runway });
+    this.setUserContext(opts);
+    if (opts.userCallsign || opts.callsign || opts.flightCallsign) this.setUserAircraft({ callsign: opts.userCallsign || opts.callsign || opts.flightCallsign, origin: opts.origin || this.airport, dest: opts.dest, runway: opts.runway, phase: opts.phase, frequency: opts.frequency, controllerRole: opts.controllerRole });
     const requestedDensity = Number(opts.density || this.density || this.minSessionAircraft);
     const maxDensity = Number(this.config.maxTrafficDensity || this.maxSessionAircraft);
     this.density = Math.max(this.minSessionAircraft, Math.min(requestedDensity, maxDensity, this.maxSessionAircraft));
@@ -147,6 +163,7 @@ class TrafficOrchestrator extends EventEmitter {
       excludeCallsigns: [...this.userCallsigns]
     });
     this.removeUserAircraftFromTraffic();
+    this.alignAircraftToUserContext();
     this.running = true;
     this.lastRadioAt = 0;
     this.radioQueue = [];
@@ -163,7 +180,7 @@ class TrafficOrchestrator extends EventEmitter {
     this.aircraft = []; this.radioQueue = [];
   }
 
-  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, logs:this.logs.slice(0,50) }; }
+  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, userPhase:this.userPhase, userControllerRole:this.userControllerRole, userFrequency:this.userFrequency, allowedAiPhases:this.allowedPhasesForUser(), logs:this.logs.slice(0,50) }; }
   adsb() { return { type:'adsb_update', aircraft:this.aircraft.map(adsbPacket) }; }
 
   tick() {
@@ -206,11 +223,46 @@ class TrafficOrchestrator extends EventEmitter {
     return set;
   }
 
+  normalizeContextText(v='') { return String(v || '').toLowerCase().replace(/[^a-z0-9_. -]/g, ' '); }
+
+  allowedPhasesForUser() {
+    const phase = this.normalizeContextText(this.userPhase);
+    const role = this.normalizeContextText(this.userControllerRole + ' ' + this.userFrequency);
+    const txt = `${phase} ${role}`;
+    if (/preflight|clearance|delivery|ifr clearance/.test(txt)) return ['PRE_FLIGHT'];
+    if (/push|startup|start|apron/.test(txt)) return ['PUSHBACK'];
+    if (/ground|taxi out|taxi-out|taxi|ramp/.test(txt) && !/landing|after|taxi in|taxi-in|gate|stand|fbo/.test(txt)) return ['PUSHBACK','TAXI_OUT'];
+    if (/tower|takeoff|departure runway|holding short/.test(txt)) return ['TAXI_OUT','HOLD_SHORT','TAKEOFF'];
+    if (/departure|climb/.test(txt)) return ['TAKEOFF','CLIMB'];
+    if (/center|enroute|cruise|route/.test(txt)) return ['CLIMB','ENROUTE'];
+    if (/approach|descent|arrival/.test(txt)) return ['DESCENT','APPROACH'];
+    if (/final|tower arrival|landing|land/.test(txt)) return ['APPROACH','FINAL','LANDING'];
+    if (/after landing|taxi in|taxi-in|gate|stand|fbo|ramp/.test(txt)) return ['LANDING','TAXI_IN'];
+    return ['PRE_FLIGHT'];
+  }
+
+  alignAircraftToUserContext() {
+    const allowed = this.allowedPhasesForUser();
+    const now = Date.now();
+    this.aircraft.forEach((ac, idx) => {
+      if (!allowed.includes(ac.phase)) {
+        ac.phase = allowed[Math.min(idx, allowed.length - 1)] || allowed[0] || 'PRE_FLIGHT';
+        ac.nextActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs) + idx * 2500;
+        if (['PRE_FLIGHT','PUSHBACK','TAXI_OUT','HOLD_SHORT'].includes(ac.phase)) { ac.position.alt = 0; ac.position.groundSpeed = 0; ac.position.verticalSpeed = 0; }
+        if (ac.phase === 'DESCENT') { ac.position.alt = Math.min(ac.assignedAltitude || 8000, 10000); ac.distanceToAirportNm = 25; }
+        if (ac.phase === 'APPROACH') { ac.position.alt = 3000; ac.distanceToAirportNm = 8; }
+        if (ac.phase === 'FINAL') { ac.position.alt = 1500; ac.distanceToAirportNm = 4; }
+      }
+    });
+    this.log('WORLD', `AI traffic scoped to user frequency/phase: ${allowed.join(', ')}`, { userPhase:this.userPhase, controllerRole:this.userControllerRole, frequency:this.userFrequency, allowed });
+  }
+
   chooseValidAircraft(now) {
-    const candidates = this.aircraft.filter(ac => !this.isUserCallsign(ac.callsign));
-    if (!candidates.length) return null;
+    const allowed = this.allowedPhasesForUser();
+    const candidates = this.aircraft.filter(ac => !this.isUserCallsign(ac.callsign) && allowed.includes(ac.phase));
+    if (!candidates.length) { this.alignAircraftToUserContext(); return null; }
     candidates.sort((a,b) => (a.nextActionAt || 0) - (b.nextActionAt || 0));
-    return candidates.find(ac => now >= (ac.nextActionAt || 0)) || candidates[0];
+    return candidates.find(ac => now >= (ac.nextActionAt || 0)) || null;
   }
 
   internalController(ac, text, meta={}) {
@@ -225,6 +277,11 @@ class TrafficOrchestrator extends EventEmitter {
   }
 
   stepAircraft(ac, now) {
+    const allowedNow = this.allowedPhasesForUser();
+    if (!allowedNow.includes(ac.phase)) {
+      ac.nextActionAt = now + this.randomBetween(this.radioEventMinMs, this.radioEventMaxMs);
+      return;
+    }
     const runway = ac.assignedRunway || '07';
     switch (ac.phase) {
       case 'PRE_FLIGHT': {
