@@ -42,5 +42,10 @@ module.exports = {
   maxAudioFiles: num('MAX_AUDIO_FILES', 10),
   audioRetentionMs: num('AUDIO_RETENTION_MS', 60000),
   autoPauseNoClients: String(process.env.AUTO_PAUSE_NO_CLIENTS || 'true').toLowerCase() !== 'false',
-  scopedTrafficOnly: String(process.env.SCOPED_TRAFFIC_ONLY || 'true').toLowerCase() !== 'false'
+  scopedTrafficOnly: String(process.env.SCOPED_TRAFFIC_ONLY || 'true').toLowerCase() !== 'false',
+  // v1.7: AI traffic audio should not create unanswered requests.
+  // It speaks readbacks/position reports only while SkyEchoCabin main ATC owns controller logic.
+  aiPilotReadbackOnly: String(process.env.AI_PILOT_READBACK_ONLY || 'true').toLowerCase() !== 'false',
+  allowAiPilotRequests: String(process.env.ALLOW_AI_PILOT_REQUESTS || 'false').toLowerCase() === 'true',
+  frontendUserPriorityEndpoint: true
 };

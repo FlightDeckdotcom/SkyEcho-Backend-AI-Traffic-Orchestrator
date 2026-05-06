@@ -85,6 +85,7 @@ async function main() {
   });
   app.get('/traffic/state', (req,res)=>res.json({ ok:true, ...traffic.snapshot() }));
   app.post('/traffic/user-state', requireSecret, (req,res)=>{ const body=req.body||{}; const user=traffic.setUserAircraft(body); if (body.pttActive || body.transmitting) traffic.setUserPtt(true, body.holdMs || config.userPttHoldMs); if (body.priorityHold) traffic.setUserPriority(body.holdMs || config.userPriorityHoldMs, body.reason || 'user state'); const out={ ok:true, userAircraft:user, snapshot:traffic.snapshot() }; broadcast({ type:'user_state', ...out }); res.json(out); });
+  app.post('/traffic/user-priority', requireSecret, (req,res)=>{ const body=req.body||{}; if (body.callsign || body.userCallsign) traffic.setUserAircraft({ callsign:body.callsign || body.userCallsign, spokenCallsign:body.spokenCallsign, origin:body.origin || body.airport, dest:body.dest, runway:body.runway }); traffic.setUserPriority(body.holdMs || config.userPriorityHoldMs, body.reason || 'frontend user priority'); if (body.pttActive || body.transmitting) traffic.setUserPtt(true, body.holdMs || config.userPttHoldMs); const out={ ok:true, snapshot:traffic.snapshot() }; broadcast({ type:'user_priority', ...out }); res.json(out); });
   app.get('/traffic/logs', (req,res)=>res.json({ ok:true, logs:traffic.logs }));
   app.get('/traffic/adsb', (req,res)=>res.json({ ok:true, ...traffic.adsb() }));
   app.get('/voice/status', (req,res)=>res.json({ ok:true, piperEnabled:config.piperEnabled, radioMinGapMs:config.radioMinGapMs, aiPhaseScale:config.aiPhaseScale, maxTrafficDensity:config.maxTrafficDensity, atcVoice:config.atcPiperVoice, trafficVoicePool:config.trafficPiperVoicePool, cabinVoice:config.cabinPiperVoice, discordBridgeUrl: config.discordBridgeUrl ? 'configured' : 'not configured', trafficAtcAudio: config.trafficAtcAudio, aiPilotAudio: config.aiPilotAudio }));
@@ -103,6 +104,6 @@ async function main() {
     }
     traffic.log('BRIDGE', event.text || event.type || 'bridge event', event); broadcast({ type:'bridge_event', event }); res.json({ ok:true, snapshot:traffic.snapshot() }); });
 
-  server.listen(config.port, () => console.log(`SkyEcho Backend v1.6 listening on ${config.port}; LIGHTWEIGHT-SCOPED-RADIO+SINGLE-CONTROLLER; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
+  server.listen(config.port, () => console.log(`SkyEcho Backend v1.7 listening on ${config.port}; ATC-SESSION-SYNC+READBACK-ONLY-AI-TRAFFIC; SAFE BOOT; local nav files=${Object.values(navData.counts).filter(n=>n>0).length}; airports=${airports.size}`));
 }
 main().catch(err => { console.error('SkyEcho Backend fatal startup error:', err); process.exit(1); });

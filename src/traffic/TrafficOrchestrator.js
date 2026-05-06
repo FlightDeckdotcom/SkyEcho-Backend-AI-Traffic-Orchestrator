@@ -213,47 +213,66 @@ class TrafficOrchestrator extends EventEmitter {
     return candidates.find(ac => now >= (ac.nextActionAt || 0)) || candidates[0];
   }
 
+  internalController(ac, text, meta={}) {
+    const ev = { type:'controller_internal', role:'atc', callsign:ac.callsign, spokenCallsign:ac.spokenCallsign, text, meta:{ controllerScope:'ai_traffic', silentController:true, ...meta }, t:Date.now() };
+    this.log('INTERNAL_ATC', text, ev);
+    this.emit('radio', ev);
+    return ev;
+  }
+
+  pilotReadback(ac, text, meta={}) {
+    return this.radio('pilot', ac, text, { readbackOnly:true, requiresAtcAnswer:false, ...meta });
+  }
+
   stepAircraft(ac, now) {
     const runway = ac.assignedRunway || '07';
     switch (ac.phase) {
       case 'PRE_FLIGHT': {
         ac.clearance.hasInitialClearance = true; ac.phase = 'PUSHBACK'; ac.nextActionAt = now + this.wait(45000);
-        this.radio('pilot', ac, `${ac.spokenCallsign}, request IFR clearance to ${ac.dest}.`);
-        this.radio('atc', ac, Phrase.clearance(ac, ac.route, runway, ac.assignedAltitude, ac.squawk), { squawkAllowed: true }); break;
+        const clearance = Phrase.clearance(ac, ac.route, runway, ac.assignedAltitude, ac.squawk);
+        this.internalController(ac, clearance, { squawkAllowed:true, clearanceIssued:true });
+        this.pilotReadback(ac, `${clearance}, ${ac.spokenCallsign}.`, { phase:'clearance_readback' }); break;
       }
       case 'PUSHBACK': {
         ac.phase = 'TAXI_OUT'; ac.nextActionAt = now + this.wait(65000);
-        this.radio('pilot', ac, `${ac.spokenCallsign}, ready to taxi.`);
-        this.radio('atc', ac, Phrase.taxiOut(ac, runway, 'Alpha'), { squawkAllowed: false }); break;
+        const taxi = Phrase.taxiOut(ac, runway, 'Alpha');
+        this.internalController(ac, taxi, { squawkAllowed:false, taxiIssued:true });
+        this.pilotReadback(ac, `Taxi to runway ${runway} via Alpha, hold short runway ${runway}, ${ac.spokenCallsign}.`, { phase:'taxi_readback' }); break;
       }
       case 'TAXI_OUT': {
         ac.phase = 'HOLD_SHORT'; ac.nextActionAt = now + this.wait(50000);
-        this.radio('pilot', ac, `${ac.spokenCallsign}, holding short runway ${runway}.`); break;
+        this.pilotReadback(ac, `${ac.spokenCallsign}, holding short runway ${runway}.`, { phase:'holding_short_report' }); break;
       }
       case 'HOLD_SHORT': {
         const can = this.runwaySequencer.canUseRunway(ac.origin, runway, ac.id);
-        this.radio('pilot', ac, `${ac.spokenCallsign}, ready for departure runway ${runway}.`);
-        if (!can.ok) { ac.nextActionAt = now + this.wait(45000); this.radio('atc', ac, Phrase.holdShort(ac, runway, `Traffic ${can.existing.callsign} using the runway`)); break; }
+        if (!can.ok) {
+          ac.nextActionAt = now + this.wait(45000);
+          const hold = Phrase.holdShort(ac, runway, `Traffic ${can.existing.callsign} using the runway`);
+          this.internalController(ac, hold, { runwayBlocked:true });
+          this.pilotReadback(ac, `Holding short runway ${runway}, ${ac.spokenCallsign}.`, { phase:'hold_short_readback' }); break;
+        }
         this.runwaySequencer.reserve({ airport: ac.origin, runway, aircraftId: ac.id, callsign: ac.callsign, type:'departure', ttlMs: 120000 });
         ac.clearance.takeoffCleared = true; ac.phase = 'TAKEOFF'; ac.position.groundSpeed = 140; ac.position.verticalSpeed = 1500; ac.nextActionAt = now + this.wait(50000);
-        this.radio('atc', ac, Phrase.takeoff(ac, runway), { squawkAllowed:false, runwayReserved:true }); break;
+        const takeoff = Phrase.takeoff(ac, runway);
+        this.internalController(ac, takeoff, { squawkAllowed:false, runwayReserved:true });
+        this.pilotReadback(ac, `Cleared for takeoff runway ${runway}, ${ac.spokenCallsign}.`, { phase:'takeoff_readback' }); break;
       }
       case 'TAKEOFF': {
         this.runwaySequencer.release(ac.origin, runway, ac.id); ac.phase = 'CLIMB'; ac.position.alt = 1500; ac.position.groundSpeed = 220; ac.nextActionAt = now + this.wait(90000);
-        this.radio('pilot', ac, `${ac.spokenCallsign}, passing one thousand five hundred for ${ac.assignedAltitude}.`); break;
+        this.pilotReadback(ac, `${ac.spokenCallsign}, passing one thousand five hundred for ${ac.assignedAltitude}.`, { phase:'departure_checkin' }); break;
       }
-      case 'CLIMB': { ac.phase = 'ENROUTE'; ac.position.alt = ac.assignedAltitude; ac.position.verticalSpeed = 0; ac.position.groundSpeed = 280; ac.nextActionAt = now + this.wait(120000); this.radio('atc', ac, `${ac.spokenCallsign}, radar contact, proceed on course.`); break; }
-      case 'ENROUTE': { ac.phase = 'DESCENT'; ac.position.verticalSpeed = -700; ac.distanceToAirportNm = 25; ac.nextActionAt = now + this.wait(120000); this.radio('atc', ac, `${ac.spokenCallsign}, descend and maintain three thousand, expect runway ${runway} approach.`); break; }
-      case 'DESCENT': { ac.phase = 'APPROACH'; ac.distanceToAirportNm = 8; ac.position.alt = 3000; ac.position.groundSpeed = 180; ac.nextActionAt = now + this.wait(70000); this.radio('pilot', ac, `${ac.spokenCallsign}, airport in sight, request visual runway ${runway}.`); this.radio('atc', ac, `${ac.spokenCallsign}, cleared visual runway ${runway} approach, report final.`, { squawkAllowed:false }); break; }
-      case 'APPROACH': { ac.phase = 'FINAL'; ac.distanceToAirportNm = 4; ac.nextActionAt = now + this.wait(60000); this.radio('pilot', ac, `${ac.spokenCallsign}, final runway ${runway}.`); break; }
+      case 'CLIMB': { ac.phase = 'ENROUTE'; ac.position.alt = ac.assignedAltitude; ac.position.verticalSpeed = 0; ac.position.groundSpeed = 280; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, radar contact, proceed on course.`); this.pilotReadback(ac, `Proceeding on course, ${ac.spokenCallsign}.`, { phase:'course_readback' }); break; }
+      case 'ENROUTE': { ac.phase = 'DESCENT'; ac.position.verticalSpeed = -700; ac.distanceToAirportNm = 25; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, descend and maintain three thousand, expect runway ${runway} approach.`); this.pilotReadback(ac, `Descend and maintain three thousand, expect runway ${runway} approach, ${ac.spokenCallsign}.`, { phase:'descent_readback' }); break; }
+      case 'DESCENT': { ac.phase = 'APPROACH'; ac.distanceToAirportNm = 8; ac.position.alt = 3000; ac.position.groundSpeed = 180; ac.nextActionAt = now + this.wait(70000); this.internalController(ac, `${ac.spokenCallsign}, cleared visual runway ${runway} approach, report final.`, { squawkAllowed:false }); this.pilotReadback(ac, `Cleared visual runway ${runway} approach, will report final, ${ac.spokenCallsign}.`, { phase:'approach_readback' }); break; }
+      case 'APPROACH': { ac.phase = 'FINAL'; ac.distanceToAirportNm = 4; ac.nextActionAt = now + this.wait(60000); this.pilotReadback(ac, `${ac.spokenCallsign}, final runway ${runway}.`, { phase:'final_report' }); break; }
       case 'FINAL': {
         const can = this.runwaySequencer.canUseRunway(ac.dest, runway, ac.id);
-        if (!can.ok) { ac.nextActionAt = now + this.wait(30000); this.radio('atc', ac, Phrase.continueFinal(ac, runway, `traffic ${can.existing.callsign} on the runway`)); break; }
+        if (!can.ok) { ac.nextActionAt = now + this.wait(30000); const cont = Phrase.continueFinal(ac, runway, `traffic ${can.existing.callsign} on the runway`); this.internalController(ac, cont); this.pilotReadback(ac, `Continuing final runway ${runway}, ${ac.spokenCallsign}.`, { phase:'continue_final_readback' }); break; }
         this.runwaySequencer.reserve({ airport: ac.dest, runway, aircraftId: ac.id, callsign: ac.callsign, type:'landing', ttlMs: 150000 });
-        ac.phase = 'LANDING'; ac.clearance.landingCleared = true; ac.nextActionAt = now + this.wait(55000); this.radio('atc', ac, Phrase.land(ac, runway), { squawkAllowed:false, runwayReserved:true }); break;
+        ac.phase = 'LANDING'; ac.clearance.landingCleared = true; ac.nextActionAt = now + this.wait(55000); const land = Phrase.land(ac, runway); this.internalController(ac, land, { squawkAllowed:false, runwayReserved:true }); this.pilotReadback(ac, `Cleared to land runway ${runway}, ${ac.spokenCallsign}.`, { phase:'landing_readback' }); break;
       }
-      case 'LANDING': { this.runwaySequencer.release(ac.dest, runway, ac.id); ac.phase = 'TAXI_IN'; ac.position.groundSpeed = 20; ac.position.alt = 0; ac.nextActionAt = now + this.wait(70000); this.radio('pilot', ac, `${ac.spokenCallsign} clear of runway ${runway}, request taxi to the ramp.`); this.radio('atc', ac, Phrase.taxiIn(ac, 'ramp', 'Alpha'), { squawkAllowed:false }); break; }
-      case 'TAXI_IN': { ac.phase = 'SHUTDOWN'; ac.nextActionAt = now + this.wait(120000); this.radio('atc', ac, `${ac.spokenCallsign}, monitor ramp, good day.`); break; }
+      case 'LANDING': { this.runwaySequencer.release(ac.dest, runway, ac.id); ac.phase = 'TAXI_IN'; ac.position.groundSpeed = 20; ac.position.alt = 0; ac.nextActionAt = now + this.wait(70000); const taxiIn = Phrase.taxiIn(ac, 'ramp', 'Alpha'); this.internalController(ac, taxiIn, { squawkAllowed:false }); this.pilotReadback(ac, `Taxi to the ramp via Alpha, ${ac.spokenCallsign}.`, { phase:'taxi_in_readback' }); break; }
+      case 'TAXI_IN': { ac.phase = 'SHUTDOWN'; ac.nextActionAt = now + this.wait(120000); this.internalController(ac, `${ac.spokenCallsign}, monitor ramp, good day.`); this.pilotReadback(ac, `Monitor ramp, good day, ${ac.spokenCallsign}.`, { phase:'ramp_readback' }); break; }
       default: ac.nextActionAt = now + this.wait(120000);
     }
   }

@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-6-lightweight-scoped-radio-world",
-  "version": "1.6.0",
-  "description": "SkyEcho Backend v1.3 backend voice router, AI traffic radio pacing, Piper role routing",
+  "name": "skyecho-backend-v1-7-atc-session-sync",
+  "version": "1.7.0",
+  "description": "SkyEcho Backend v1.7 ATC session synchronized AI traffic readback-only radio",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
