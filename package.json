@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-7-atc-session-sync",
-  "version": "1.7.0",
-  "description": "SkyEcho Backend v1.7 ATC session synchronized AI traffic readback-only radio",
+  "name": "skyecho-backend-v1-8-frequency-scoped-ai-traffic",
+  "version": "1.8.0",
+  "description": "SkyEcho Backend v1.8 frequency-scoped AI traffic synchronized to user ATC phase and frequency",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
