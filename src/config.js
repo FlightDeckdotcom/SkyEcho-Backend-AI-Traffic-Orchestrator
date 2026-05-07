@@ -51,5 +51,19 @@ module.exports = {
   // v1.9: AI pilots must request through frontend SkyEchoCabin ATC before they read back.
   aiAtcBridgeRequired: String(process.env.AI_ATC_BRIDGE_REQUIRED || 'true').toLowerCase() !== 'false',
   aiAtcRequestTimeoutMs: num('AI_ATC_REQUEST_TIMEOUT_MS', 30000),
-  aiAtcMaxPending: num('AI_ATC_MAX_PENDING', 3)
+  aiAtcMaxPending: num('AI_ATC_MAX_PENDING', 3),
+
+  // v2.0: OpenSky REST seed mode. OpenSky provides a light real-world traffic seed; SkyEcho still controls ATC.
+  trafficSource: process.env.TRAFFIC_SOURCE || 'procedural',
+  openSkyEnabled: String(process.env.OPENSKY_ENABLED || 'false').toLowerCase() === 'true',
+  openSkyMode: process.env.OPENSKY_MODE || 'session_seed',
+  openSkyClientId: process.env.OPENSKY_CLIENT_ID || '',
+  openSkyClientSecret: process.env.OPENSKY_CLIENT_SECRET || '',
+  openSkyMaxCallsPerSession: num('OPENSKY_MAX_CALLS_PER_SESSION', 3),
+  openSkyCacheTtlMs: num('OPENSKY_CACHE_TTL_MS', 1800000),
+  openSkyMaxAircraft: num('OPENSKY_MAX_AIRCRAFT', 7),
+  openSkyRouteBubbleNm: num('OPENSKY_ROUTE_BUBBLE_NM', 80),
+  openSkyMaxBoxDeg2: num('OPENSKY_MAX_BOX_DEG2', 25),
+  openSkyTimeoutMs: num('OPENSKY_TIMEOUT_MS', 8000),
+  fallbackProceduralTraffic: String(process.env.FALLBACK_PROCEDURAL_TRAFFIC || 'true').toLowerCase() !== 'false'
 };

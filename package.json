@@ -1,7 +1,7 @@
 {
-  "name": "skyecho-backend-v1-9-1-ai-audio-release",
-  "version": "1.9.1",
-  "description": "SkyEcho Backend v1.9 AI traffic requests routed through frontend SkyEchoCabin ATC before AI readback",
+  "name": "skyecho-backend-v2-0-opensky-rest-seed",
+  "version": "2.0.0",
+  "description": "SkyEcho Backend v2.0 OpenSky REST session seed traffic with SkyEchoCabin AI ATC bridge",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

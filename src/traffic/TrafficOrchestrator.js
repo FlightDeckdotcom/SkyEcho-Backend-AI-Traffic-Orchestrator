@@ -7,12 +7,15 @@ const { adsbPacket } = require('./TelemetryBroadcaster');
 function scaled(ms, scale=1) { return Math.max(8000, Math.round(ms * scale)); }
 
 class TrafficOrchestrator extends EventEmitter {
-  constructor({ schedules, routes, airlineRegistry, runwaySequencer, arrivalSequencer, groundSequencer, config = {}, voiceRouter = null }) {
+  constructor({ schedules, routes, airlineRegistry, runwaySequencer, arrivalSequencer, groundSequencer, config = {}, voiceRouter = null, openSkySeedProvider = null }) {
     super();
     this.schedules = schedules; this.routes = routes; this.airlineRegistry = airlineRegistry;
     this.runwaySequencer = runwaySequencer; this.arrivalSequencer = arrivalSequencer; this.groundSequencer = groundSequencer;
     this.config = config;
     this.voiceRouter = voiceRouter;
+    this.openSkySeedProvider = openSkySeedProvider;
+    this.seedSource = 'procedural';
+    this.seedStatus = null;
     this.aircraft = []; this.running = false; this.timer = null; this.airport = 'TKPK';
     this.density = Number(config.defaultDensity || 1); this.logs = [];
     this.radioQueue = [];
@@ -42,6 +45,7 @@ class TrafficOrchestrator extends EventEmitter {
     this.aiAtcBridgeRequired = config.aiAtcBridgeRequired !== false;
     this.aiAtcRequestTimeoutMs = Number(config.aiAtcRequestTimeoutMs || 30000);
     this.aiAtcMaxPending = Number(config.aiAtcMaxPending || 3);
+    this.trafficSource = String(config.trafficSource || 'procedural').toLowerCase();
   }
 
   setUserContext(data = {}) {
@@ -178,6 +182,72 @@ class TrafficOrchestrator extends EventEmitter {
     if (this.voiceRouter) this.voiceRouter.routeRadio(ev).catch(err => this.log('VOICE_ERROR', err.message, { event:ev }));
   }
 
+
+  convertOpenSkyAircraft(seedAircraft=[], opts={}) {
+    const allowed = this.allowedPhasesForUser();
+    const phases = allowed.length ? allowed : ['PRE_FLIGHT'];
+    const runway = opts.runway || '07';
+    return seedAircraft.map((s, idx) => {
+      const phase = phases[Math.min(idx, phases.length - 1)] || phases[0];
+      const callsign = normalizeCallsign(s.callsign || `OSKY${idx+1}`);
+      const alt = Number.isFinite(Number(s.altitudeFt)) ? Number(s.altitudeFt) : (s.onGround ? 0 : 8000);
+      return {
+        id: `osky-${s.icao24 || callsign}-${idx}`,
+        source: 'opensky',
+        icao24: s.icao24,
+        callsign,
+        spokenCallsign: s.spokenCallsign || callsign,
+        origin: opts.origin || this.airport,
+        dest: opts.dest || opts.destination || this.airport,
+        route: opts.route || 'DCT',
+        assignedAltitude: alt > 0 ? Math.max(2500, Math.round(alt / 1000) * 1000) : 7000,
+        assignedRunway: runway,
+        squawk: s.squawk || String(1200 + idx * 137).padStart(4, '0').slice(0,4),
+        phase,
+        position: {
+          lat: s.lat,
+          lon: s.lon,
+          alt: ['PRE_FLIGHT','PUSHBACK','TAXI_OUT','HOLD_SHORT'].includes(phase) ? 0 : alt,
+          heading: s.heading || 70,
+          groundSpeed: ['PRE_FLIGHT','PUSHBACK','TAXI_OUT','HOLD_SHORT'].includes(phase) ? 0 : (s.groundSpeedKt || 220),
+          verticalSpeed: s.verticalRateFpm || 0
+        },
+        clearance: {},
+        distanceToAirportNm: phase === 'APPROACH' ? 8 : phase === 'FINAL' ? 4 : phase === 'DESCENT' ? 25 : 0,
+        nextActionAt: Date.now() + this.randomBetween(3000, 12000),
+        openSky: s
+      };
+    }).filter(ac => ac.callsign && !this.isUserCallsign(ac.callsign));
+  }
+
+  async tryOpenSkySeed(opts={}) {
+    if (!this.openSkySeedProvider || !(this.config.openSkyEnabled || this.trafficSource.includes('opensky'))) return;
+    try {
+      this.log('OPENSKY', 'OpenSky session seed requested.', { mode:this.config.openSkyMode, scopeAirports:[...this.scopeAirports], maxAircraft:this.config.openSkyMaxAircraft });
+      const seed = await this.openSkySeedProvider.seedTraffic({ ...opts, airport:this.airport, scopeAirports:[...this.scopeAirports] });
+      this.seedStatus = seed;
+      if (seed.ok && seed.aircraft && seed.aircraft.length) {
+        const converted = this.convertOpenSkyAircraft(seed.aircraft, opts);
+        if (converted.length) {
+          this.aircraft = converted.slice(0, Number(this.config.openSkyMaxAircraft || this.maxSessionAircraft || 7));
+          this.seedSource = seed.cached ? 'opensky-cache' : 'opensky';
+          this.alignAircraftToUserContext();
+          this.log('OPENSKY', `OpenSky seeded ${this.aircraft.length} AI aircraft for this session.`, { boxes:seed.boxes, cached:!!seed.cached, errors:seed.errors || [] });
+          this.emit('adsb', this.adsb());
+          this.emit('state', this.snapshot());
+        }
+      } else if (this.config.fallbackProceduralTraffic) {
+        this.log('OPENSKY', 'OpenSky returned no usable aircraft; keeping procedural fallback traffic.', { errors:seed.errors || [], boxes:seed.boxes || [] });
+      } else {
+        this.aircraft = [];
+        this.log('OPENSKY', 'OpenSky returned no usable aircraft and procedural fallback is disabled.', { errors:seed.errors || [] });
+      }
+    } catch (e) {
+      this.seedStatus = { ok:false, source:'opensky', error:e.message };
+      this.log('OPENSKY_ERROR', e.message, { fallbackProceduralTraffic:this.config.fallbackProceduralTraffic });
+    }
+  }
+
   start(opts={}) {
     this.stop();
     this.airport = opts.airport || this.airport;
@@ -203,6 +273,7 @@ class TrafficOrchestrator extends EventEmitter {
     this.pendingAiRequests.clear();
     this.nextGlobalActionAt = Date.now() + this.randomBetween(2500, 6500);
     this.log('SYSTEM', `Backend AI scoped traffic started for ${this.airport}. ${this.aircraft.length} aircraft spawned. scope=${[...this.scopeAirports].join('/') || 'local'} radioEvent=${this.radioEventMinMs}-${this.radioEventMaxMs}ms maxQueue=${this.maxRadioQueue}`);
+    this.tryOpenSkySeed(opts);
     this.timer = setInterval(() => this.tick(), opts.tickMs || 1000);
     return this.snapshot();
   }
@@ -214,7 +285,7 @@ class TrafficOrchestrator extends EventEmitter {
     this.aircraft = []; this.radioQueue = []; this.pendingAiRequests.clear();
   }
 
-  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, userPhase:this.userPhase, userControllerRole:this.userControllerRole, userFrequency:this.userFrequency, allowedAiPhases:this.allowedPhasesForUser(), pendingAiRequests:[...this.pendingAiRequests.values()].map(p=>p.req), aiAtcBridgeRequired:this.aiAtcBridgeRequired, logs:this.logs.slice(0,50) }; }
+  snapshot() { return { running:this.running, airport:this.airport, density:this.density, aircraft:this.aircraft, runwayReservations:this.runwaySequencer.snapshot(), radioQueueDepth:this.radioQueue.length, maxRadioQueue:this.maxRadioQueue, radioMinGapMs:this.radioMinGapMs, radioEventMinMs:this.radioEventMinMs, radioEventMaxMs:this.radioEventMaxMs, scopeAirports:[...this.scopeAirports], pausedForNoClients:this.pausedForNoClients, oneWorldMode:this.oneWorldMode, trafficAtcAudio:!!this.config.trafficAtcAudio, aiPilotAudio:this.config.aiPilotAudio!==false, userAircraft:this.userAircraft, userCallsigns:[...this.userCallsigns], userPriorityActive:Date.now()<this.userPriorityUntil||this.userPttActive, userPriorityUntil:this.userPriorityUntil, userPhase:this.userPhase, userControllerRole:this.userControllerRole, userFrequency:this.userFrequency, allowedAiPhases:this.allowedPhasesForUser(), pendingAiRequests:[...this.pendingAiRequests.values()].map(p=>p.req), aiAtcBridgeRequired:this.aiAtcBridgeRequired, seedSource:this.seedSource, seedStatus:this.seedStatus, logs:this.logs.slice(0,50) }; }
   adsb() { return { type:'adsb_update', aircraft:this.aircraft.map(adsbPacket) }; }
 
   tick() {
