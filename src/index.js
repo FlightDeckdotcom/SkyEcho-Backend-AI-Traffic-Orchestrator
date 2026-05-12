@@ -30,11 +30,14 @@ const { VoiceRouter } = require('./voice/VoiceRouter');
 // Kokoro traffic TTS helper.
 // Make sure this file exists at: src/kokoroTrafficVoice.js
 let runKokoro = null;
+
 try {
   ({ runKokoro } = require('./kokoroTrafficVoice'));
 } catch (err) {
   console.warn('[KOKORO] kokoroTrafficVoice.js not loaded:', err.message);
 }
+
+const DEFAULT_KOKORO_TIMEOUT_MS = Number(process.env.KOKORO_TIMEOUT_MS || 90000);
 
 async function main() {
   const dataDir = path.join(__dirname, '..', 'data');
@@ -86,6 +89,7 @@ async function main() {
 
   function broadcast(obj) {
     const msg = JSON.stringify(obj);
+
     for (const ws of clients) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(msg);
@@ -94,7 +98,10 @@ async function main() {
   }
 
   function requireSecret(req, res, next) {
-    const secret = req.headers['x-bridge-secret'] || req.query.secret || req.body?.secret;
+    const secret =
+      req.headers['x-bridge-secret'] ||
+      req.query.secret ||
+      req.body?.secret;
 
     if (
       config.bridgeSecret &&
@@ -177,7 +184,9 @@ async function main() {
       ws: '/ws',
       health: '/health',
       dataStatus: '/data/status',
-      sync: '/data/sync'
+      sync: '/data/sync',
+      kokoroTrafficRoute: !!runKokoro,
+      kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
 
@@ -197,7 +206,8 @@ async function main() {
       trafficSource: config.trafficSource,
       openSkyEnabled: config.openSkyEnabled,
       seedSource: traffic.snapshot().seedSource,
-      kokoroTrafficRoute: !!runKokoro
+      kokoroTrafficRoute: !!runKokoro,
+      kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
 
@@ -244,6 +254,7 @@ async function main() {
 
       if (scopeList.length) {
         const scopeSet = new Set(scopeList);
+
         nextAirportRows = nextAirportRows.filter((r) =>
           scopeSet.has(String(r.airport_icao || '').toUpperCase())
         );
@@ -288,7 +299,6 @@ async function main() {
 
   app.post('/traffic/user-state', requireSecret, (req, res) => {
     const body = req.body || {};
-
     const user = traffic.setUserAircraft(body);
 
     if (body.pttActive || body.transmitting) {
@@ -372,7 +382,8 @@ async function main() {
       aiPilotAudio: config.aiPilotAudio,
       trafficSource: config.trafficSource,
       openSkyEnabled: config.openSkyEnabled,
-      kokoroTrafficRoute: !!runKokoro
+      kokoroTrafficRoute: !!runKokoro,
+      kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
 
@@ -392,8 +403,9 @@ async function main() {
   });
 
   // Kokoro traffic TTS route used by the frontend AI traffic audio.
-  // This fixes:
+  // Fixes:
   // Cannot POST /api/traffic/kokoro-tts
+  // python3 timed out after 22000ms
   app.post('/api/traffic/kokoro-tts', async (req, res) => {
     try {
       if (!runKokoro) {
@@ -419,15 +431,25 @@ async function main() {
 
       const callsign = body.callsign || body.userCallsign || 'traffic';
 
+      const effectiveTimeoutMs = Number(
+        body.timeoutMs ||
+        process.env.KOKORO_TIMEOUT_MS ||
+        DEFAULT_KOKORO_TIMEOUT_MS
+      );
+
       const result = await runKokoro({
         text,
         callsign,
-        voice: body.voice || config.kokoroTrafficVoice || 'af_heart',
-        speed: Number(body.speed || config.kokoroTrafficSpeed || 1.0),
-        timeoutMs: Number(body.timeoutMs || 22000)
+        voice: body.voice || config.kokoroTrafficVoice || process.env.KOKORO_TRAFFIC_VOICE || 'af_heart',
+        speed: Number(body.speed || config.kokoroTrafficSpeed || process.env.KOKORO_TRAFFIC_SPEED || 1.0),
+        timeoutMs: effectiveTimeoutMs
       });
 
-      console.log(`[KOKORO] generated role=traffic voice=${result.voice} ${result.audioUrl}`);
+      console.log(
+        `[KOKORO] generated role=traffic callsign=${callsign} ` +
+        `voice=${result.voice} elapsedMs=${result.elapsedMs || 'unknown'} ` +
+        `${result.audioUrl}`
+      );
 
       return res.json({
         ok: true,
@@ -435,12 +457,17 @@ async function main() {
         role: 'traffic',
         callsign,
         voice: result.voice,
+        speed: result.speed || null,
+        elapsedMs: result.elapsedMs || null,
         audioUrl: result.audioUrl,
         audioPath: result.audioPath || result.audioUrl,
         durationMs: result.durationMs || null
       });
     } catch (err) {
-      console.error('[KOKORO] traffic TTS failed:', err && err.message ? err.message : err);
+      console.error(
+        '[KOKORO] traffic TTS failed:',
+        err && err.message ? err.message : err
+      );
 
       return res.status(502).json({
         ok: false,
@@ -643,7 +670,8 @@ async function main() {
       `OPENSKY-REST-SEED+AI-ATC-BRIDGE; SAFE BOOT; ` +
       `local nav files=${Object.values(navData.counts).filter((n) => n > 0).length}; ` +
       `airports=${airports.size}; ` +
-      `kokoroTrafficRoute=${!!runKokoro}`
+      `kokoroTrafficRoute=${!!runKokoro}; ` +
+      `kokoroTimeoutMs=${DEFAULT_KOKORO_TIMEOUT_MS}`
     );
   });
 }
