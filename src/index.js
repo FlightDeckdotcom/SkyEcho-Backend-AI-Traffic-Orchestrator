@@ -28,7 +28,7 @@ const { OpenSkySeedProvider } = require('./traffic/OpenSkySeedProvider');
 const { VoiceRouter } = require('./voice/VoiceRouter');
 
 // Kokoro traffic TTS helper.
-// Make sure this file exists at: src/kokoroTrafficVoice.js
+// Kept available, but disabled by default because Kokoro is too heavy/slow for live traffic on Render.
 let runKokoro = null;
 
 try {
@@ -39,11 +39,13 @@ try {
 
 const DEFAULT_KOKORO_TIMEOUT_MS = Number(process.env.KOKORO_TIMEOUT_MS || 90000);
 
+function isKokoroTrafficEnabled() {
+  return String(process.env.KOKORO_TRAFFIC_ENABLED || 'false').toLowerCase() === 'true';
+}
+
 async function main() {
   const dataDir = path.join(__dirname, '..', 'data');
 
-  // v1.2: boot safely from local starter data first.
-  // Remote GitHub navdata is lazy-loaded after the server is alive.
   let navData = await loadNavData({
     dataDir,
     baseUrl: config.navDataBaseUrl || DEFAULT_NAVDATA_BASE_URL,
@@ -186,6 +188,7 @@ async function main() {
       dataStatus: '/data/status',
       sync: '/data/sync',
       kokoroTrafficRoute: !!runKokoro,
+      kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
@@ -207,6 +210,7 @@ async function main() {
       openSkyEnabled: config.openSkyEnabled,
       seedSource: traffic.snapshot().seedSource,
       kokoroTrafficRoute: !!runKokoro,
+      kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
@@ -383,6 +387,7 @@ async function main() {
       trafficSource: config.trafficSource,
       openSkyEnabled: config.openSkyEnabled,
       kokoroTrafficRoute: !!runKokoro,
+      kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
     });
   });
@@ -402,12 +407,21 @@ async function main() {
     });
   });
 
-  // Kokoro traffic TTS route used by the frontend AI traffic audio.
-  // Fixes:
-  // Cannot POST /api/traffic/kokoro-tts
-  // python3 timed out after 22000ms
+  // Kokoro route intentionally remains so old frontend versions do not receive 404.
+  // But Kokoro is disabled by default for live AI traffic because it is too slow/heavy on Render.
   app.post('/api/traffic/kokoro-tts', async (req, res) => {
     try {
+      if (!isKokoroTrafficEnabled()) {
+        return res.status(503).json({
+          ok: false,
+          engine: 'kokoro',
+          role: 'traffic',
+          disabled: true,
+          fallback: 'piper',
+          error: 'Kokoro traffic TTS is disabled. Use Piper medium/low traffic voice.'
+        });
+      }
+
       if (!runKokoro) {
         return res.status(503).json({
           ok: false,
@@ -431,10 +445,16 @@ async function main() {
 
       const callsign = body.callsign || body.userCallsign || 'traffic';
 
-      const effectiveTimeoutMs = Number(
+      const requestedTimeoutMs = Number(
         body.timeoutMs ||
         process.env.KOKORO_TIMEOUT_MS ||
         DEFAULT_KOKORO_TIMEOUT_MS
+      );
+
+      const effectiveTimeoutMs = Math.max(
+        requestedTimeoutMs || DEFAULT_KOKORO_TIMEOUT_MS,
+        DEFAULT_KOKORO_TIMEOUT_MS,
+        90000
       );
 
       const result = await runKokoro({
@@ -671,6 +691,7 @@ async function main() {
       `local nav files=${Object.values(navData.counts).filter((n) => n > 0).length}; ` +
       `airports=${airports.size}; ` +
       `kokoroTrafficRoute=${!!runKokoro}; ` +
+      `kokoroTrafficEnabled=${isKokoroTrafficEnabled()}; ` +
       `kokoroTimeoutMs=${DEFAULT_KOKORO_TIMEOUT_MS}`
     );
   });
