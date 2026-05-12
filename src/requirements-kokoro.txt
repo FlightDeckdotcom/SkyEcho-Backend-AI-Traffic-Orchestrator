@@ -1,3 +1,0 @@
-kokoro
-soundfile
-numpy
