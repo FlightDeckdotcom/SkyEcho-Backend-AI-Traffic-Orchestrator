@@ -3,6 +3,7 @@
 const { TrafficWorld } = require('./TrafficWorld');
 const { installOpenSkyIntoTrafficWorld } = require('./OpenSkyTrafficV2Integration');
 const { registerOpenSkyTrafficV2Routes } = require('./registerOpenSkyTrafficV2Routes');
+const { registerNetworkDiagnosticsRoutes } = require('./networkDiagnostics');
 
 function registerTrafficV2Routes({
   app,
@@ -29,6 +30,10 @@ function registerTrafficV2Routes({
   // radio queueing, squawk fallback, and Piper TTS behavior.
   installOpenSkyIntoTrafficWorld(trafficV2);
   registerOpenSkyTrafficV2Routes({ app, requireSecret, trafficV2 });
+
+  // Temporary diagnostic route for testing Render outbound network access.
+  // This helps confirm whether Render can reach OpenSky directly.
+  registerNetworkDiagnosticsRoutes({ app, requireSecret });
 
   trafficV2.on('state', (state) => {
     if (broadcast) {
@@ -68,7 +73,8 @@ function registerTrafficV2Routes({
       ok: true,
       service: 'SkyEcho Traffic Engine v2',
       state: trafficV2.snapshot().radio,
-      opensky: trafficV2.opensky ? trafficV2.opensky.snapshot() : null
+      opensky: trafficV2.opensky ? trafficV2.opensky.snapshot() : null,
+      diagnostics: '/traffic-v2/net/test'
     });
   });
 
