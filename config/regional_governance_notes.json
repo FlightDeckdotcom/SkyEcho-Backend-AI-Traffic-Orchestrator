@@ -1,0 +1,13 @@
+{
+  "source_priority": [
+    "Airport/procedure-specific CSV/navdata/SID/STAR/IAP constraints",
+    "State AIP operational rule profile",
+    "Regional profile: FAA_US, EASA_EUROCONTROL, ICAO_CAR",
+    "ICAO_DEFAULT fallback"
+  ],
+  "profiles": {
+    "FAA_US": "K-prefix airports, FAA phraseology, inHg altimeter, FL180 domestic profile",
+    "EASA_EUROCONTROL": "E/L-prefix airports, State eAIP procedure source, EUROCONTROL eAIP presentation/governance profile",
+    "ICAO_CAR": "T-prefix Caribbean airports, State AIP/ECCA/ICAO CAR profile"
+  }
+}
