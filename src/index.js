@@ -26,6 +26,7 @@ const { AtcEngine } = require('./atc/AtcEngine');
 const { spokenCallsign } = require('./atc/CallsignFormatter');
 const { OpenSkySeedProvider } = require('./traffic/OpenSkySeedProvider');
 const { VoiceRouter } = require('./voice/VoiceRouter');
+const { registerTrafficV2Routes } = require('./traffic-v2/registerTrafficV2Routes');
 
 // Kokoro traffic TTS helper.
 // Kept available, but disabled by default because Kokoro is too heavy/slow for live traffic on Render.
@@ -140,6 +141,8 @@ async function main() {
     log: (msg, data) => console.log('[OPENSKY]', msg, data || '')
   });
 
+  // Existing SkyEcho traffic engine.
+  // Do not remove. Frontend still uses this until Traffic v2 is fully tested.
   const traffic = new TrafficOrchestrator({
     schedules,
     routes,
@@ -157,6 +160,21 @@ async function main() {
     airlineRegistry
   });
 
+  // New SkyEcho Traffic Engine v2.
+  // This runs beside the existing traffic engine and exposes /traffic-v2/* routes.
+  // It does not replace /traffic/* yet.
+  const trafficV2 = registerTrafficV2Routes({
+    app,
+    wss,
+    broadcast,
+    requireSecret,
+    config,
+    airports,
+    routes,
+    schedules,
+    log: (msg, data) => console.log('[TRAFFIC-V2]', msg, data || '')
+  });
+
   wss.on('connection', (ws) => {
     clients.add(ws);
 
@@ -164,6 +182,7 @@ async function main() {
       type: 'hello',
       service: 'skyecho-backend-v2.0-opensky-seed',
       traffic: traffic.snapshot(),
+      trafficV2: trafficV2 ? trafficV2.snapshot() : null,
       data: {
         source: navData.source,
         counts: navData.counts,
@@ -187,6 +206,7 @@ async function main() {
       health: '/health',
       dataStatus: '/data/status',
       sync: '/data/sync',
+      trafficV2: '/traffic-v2/health',
       kokoroTrafficRoute: !!runKokoro,
       kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
@@ -209,6 +229,9 @@ async function main() {
       trafficSource: config.trafficSource,
       openSkyEnabled: config.openSkyEnabled,
       seedSource: traffic.snapshot().seedSource,
+      trafficV2Registered: !!trafficV2,
+      trafficV2Running: trafficV2 ? trafficV2.running : false,
+      trafficV2Aircraft: trafficV2 ? trafficV2.aircraft.size : 0,
       kokoroTrafficRoute: !!runKokoro,
       kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
@@ -386,6 +409,7 @@ async function main() {
       aiPilotAudio: config.aiPilotAudio,
       trafficSource: config.trafficSource,
       openSkyEnabled: config.openSkyEnabled,
+      trafficV2Registered: !!trafficV2,
       kokoroTrafficRoute: !!runKokoro,
       kokoroTrafficEnabled: isKokoroTrafficEnabled(),
       kokoroTimeoutMs: DEFAULT_KOKORO_TIMEOUT_MS
@@ -690,6 +714,7 @@ async function main() {
       `OPENSKY-REST-SEED+AI-ATC-BRIDGE; SAFE BOOT; ` +
       `local nav files=${Object.values(navData.counts).filter((n) => n > 0).length}; ` +
       `airports=${airports.size}; ` +
+      `trafficV2Registered=${!!trafficV2}; ` +
       `kokoroTrafficRoute=${!!runKokoro}; ` +
       `kokoroTrafficEnabled=${isKokoroTrafficEnabled()}; ` +
       `kokoroTimeoutMs=${DEFAULT_KOKORO_TIMEOUT_MS}`
