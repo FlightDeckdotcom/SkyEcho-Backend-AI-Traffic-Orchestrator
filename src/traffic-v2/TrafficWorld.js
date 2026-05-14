@@ -27,6 +27,7 @@ class TrafficWorld extends EventEmitter {
     this.running = false;
 
     this.squawks = new SquawkManager();
+
     this.resolver = new RouteProcedureResolver({
       airports,
       routes,
@@ -68,8 +69,9 @@ class TrafficWorld extends EventEmitter {
       '121.90'
     );
 
-    for (let i = 0; i < count; i++) {
-      const [callsign, spokenCallsign] = DEFAULT_CALLSIGNS[i % DEFAULT_CALLSIGNS.length];
+    for (let i = 0; i < count; i += 1) {
+      const [callsign, spokenCallsign] =
+        DEFAULT_CALLSIGNS[i % DEFAULT_CALLSIGNS.length];
 
       const aiPlan = this.buildAiFlightPlan({
         airport: userAirport,
@@ -124,9 +126,15 @@ class TrafficWorld extends EventEmitter {
   } = {}) {
     const sessionAirport = normalizeIcao(airport || userOrigin, 'KMCO');
 
-    // Critical design rule:
-    // User route belongs to the user's ATC session only.
-    // AI traffic must never inherit the user's active route.
+    /*
+      Critical design rule:
+      The user's route belongs to the user's ATC session only.
+      AI traffic must never inherit the user's active route.
+      userRoute is intentionally not used below.
+    */
+    void userDestination;
+    void userRoute;
+
     const aiPairs = this.aiCityPairsForAirport(sessionAirport);
 
     const selected = aiPairs[index % aiPairs.length] || {
@@ -134,13 +142,20 @@ class TrafficWorld extends EventEmitter {
       destination: this.defaultAiDestination(sessionAirport)
     };
 
-    const aiOrigin = normalizeIcao(selected.origin || sessionAirport, sessionAirport);
+    const aiOrigin = normalizeIcao(
+      selected.origin || sessionAirport,
+      sessionAirport
+    );
+
     const aiDestination = normalizeIcao(
       selected.destination || this.defaultAiDestination(aiOrigin),
       this.defaultAiDestination(aiOrigin)
     );
 
-    const aiRunway = selected.runway || runway || this.defaultRunwayForAirport(aiOrigin);
+    const aiRunway =
+      selected.runway ||
+      runway ||
+      this.defaultRunwayForAirport(aiOrigin);
 
     const aiRoute = this.buildAiRouteForAircraft({
       airport: sessionAirport,
@@ -163,9 +178,12 @@ class TrafficWorld extends EventEmitter {
   aiCityPairsForAirport(airport) {
     const a = normalizeIcao(airport);
 
-    // These are starter AI city-pairs. They are intentionally independent
-    // of the user's route. Later, this can be expanded from OpenFlights
-    // route pairs or your AIP/CSV schedules, but not from the user's flight plan.
+    /*
+      Starter AI city pairs.
+      These are independent from the user flight plan.
+      Later these can be expanded from OpenFlights city-pairs,
+      AIP schedules, or CSV schedules, but not from the user route.
+    */
     if (a === 'KMCO') {
       return [
         { origin: 'KMCO', destination: 'KATL', runway: '36R' },
@@ -200,7 +218,11 @@ class TrafficWorld extends EventEmitter {
     }
 
     return [
-      { origin: a, destination: this.defaultAiDestination(a), runway: this.defaultRunwayForAirport(a) }
+      {
+        origin: a,
+        destination: this.defaultAiDestination(a),
+        runway: this.defaultRunwayForAirport(a)
+      }
     ];
   }
 
@@ -224,12 +246,47 @@ class TrafficWorld extends EventEmitter {
     return '09';
   }
 
-  buildAiRouteForAircraft({ airport, origin, dest, runway, callsign, index = 0 } = {}) {
+  buildAiRouteForAircraft({
+    airport,
+    origin,
+    dest,
+    runway,
+    callsign,
+    index = 0
+  } = {}) {
     const o = normalizeIcao(origin || airport, 'KMCO');
-    const d = normalizeIcao(dest || this.defaultAiDestination(o), this.defaultAiDestination(o));
+    const d = normalizeIcao(
+      dest || this.defaultAiDestination(o),
+      this.defaultAiDestination(o)
+    );
 
-    // Caribbean starter logic.
-    // These are AI-safe route skeletons. They are not copied from the user route.
+    const cs = String(callsign || '').toUpperCase();
+
+    /*
+      GA / N-number logic:
+      N172SP should not fly an airline SID like MZULO3.
+      Keep it simple GA/VFR/light IFR style.
+    */
+    if (cs.startsWith('N')) {
+      if (o === 'KMCO' && d === 'KJAX') {
+        return 'DCT OMN DCT CRG';
+      }
+
+      if (o === 'KMCO') {
+        return 'DCT OMN DCT CRG';
+      }
+
+      if (o === 'TKPK') {
+        return 'DCT SKB DCT ANU';
+      }
+
+      return `DCT ${this.shortFixName(d)}`;
+    }
+
+    /*
+      Caribbean starter AI route skeletons.
+      These are not copied from the user's route.
+    */
     if (o === 'TKPK' && d === 'TAPA') {
       return 'SKB DCT ANU';
     }
@@ -270,9 +327,11 @@ class TrafficWorld extends EventEmitter {
       return 'ANU DCT BGI';
     }
 
-    // KMCO starter logic.
-    // This should later be replaced/expanded with FAA CIFP/NASR or proper procedure CSV data.
-    // These are AI traffic routes only. They do not affect the user flight plan.
+    /*
+      KMCO starter AI route logic.
+      These are AI traffic routes only.
+      They do not affect the user flight plan.
+    */
     if (o === 'KMCO' && d === 'KJFK') {
       return 'MZULO3 ETECK DCT PELCN Y309 FLRDA DCT SAGGY DCT CHIEZ Q161 KALDA Q108 SIE CAMRN5';
     }
@@ -294,14 +353,17 @@ class TrafficWorld extends EventEmitter {
     }
 
     if (o === 'KMCO' && d === 'KJAX') {
-      return 'MZULO3 DCT OMN DCT CRG';
+      return 'DCT OMN DCT CRG';
     }
 
     if (o === 'KMCO' && d === 'KTPA') {
       return 'DCT LAL DCT PIE';
     }
 
-    // Generic fallback. Keep it simple and safe.
+    /*
+      Generic fallback.
+      Keep it simple and safe.
+    */
     return `${this.shortFixName(o)} DCT ${this.shortFixName(d)}`;
   }
 
@@ -351,17 +413,29 @@ class TrafficWorld extends EventEmitter {
       routeState,
       initialAltitude,
       assignedAltitude: initialAltitude,
-      cruiseAltitude: this.defaultCruiseAltitude({ origin, destination, index }),
+      cruiseAltitude: this.defaultCruiseAltitude({
+        origin,
+        destination,
+        index
+      }),
       heading: runway && String(runway).startsWith('36') ? 360 : 90,
       frequencies: this.defaultFrequencies(origin),
       radioCooldownUntil: 0,
       adsb: null
     };
 
-    aircraft.frequency = aircraft.frequencies.ground || aircraft.frequencies.clearance || '121.90';
-    aircraft.controller = aircraft.frequencies.groundName || 'Ground';
+    aircraft.frequency =
+      aircraft.frequencies.ground ||
+      aircraft.frequencies.clearance ||
+      '121.90';
+
+    aircraft.controller =
+      aircraft.frequencies.groundName ||
+      aircraft.frequencies.clearanceName ||
+      'Ground';
 
     aircraft.adsb = this.adsb.createTarget(aircraft);
+
     this.normalizeGroundStateIfNeeded(aircraft);
 
     this.aircraft.set(id, aircraft);
@@ -375,7 +449,10 @@ class TrafficWorld extends EventEmitter {
 
     if (o === 'KMCO' && d === 'KTPA') return 12000;
     if (o === 'KMCO' && d === 'KJAX') return 18000;
-    if (o === 'TKPK' || o === 'TAPA') return 16000 + (index % 3) * 2000;
+
+    if (o === 'TKPK' || o === 'TAPA') {
+      return 16000 + (index % 3) * 2000;
+    }
 
     return 30000 + (index % 4) * 2000;
   }
@@ -386,6 +463,7 @@ class TrafficWorld extends EventEmitter {
     if (o === 'KMCO') {
       return {
         clearance: '121.80',
+        clearanceName: 'Orlando Clearance',
         ground: '121.80',
         groundName: 'Orlando Ground',
         tower: '124.30',
@@ -402,6 +480,7 @@ class TrafficWorld extends EventEmitter {
     if (o === 'TAPA') {
       return {
         clearance: '121.90',
+        clearanceName: 'V.C. Bird Clearance',
         ground: '121.90',
         groundName: 'V.C. Bird Ground',
         tower: '118.20',
@@ -418,6 +497,7 @@ class TrafficWorld extends EventEmitter {
     if (o === 'TKPK') {
       return {
         clearance: '121.90',
+        clearanceName: 'Robert L. Bradshaw Clearance',
         ground: '121.90',
         groundName: 'Robert L. Bradshaw Ground',
         tower: '118.30',
@@ -433,6 +513,7 @@ class TrafficWorld extends EventEmitter {
 
     return {
       clearance: '121.90',
+      clearanceName: 'Clearance',
       ground: '121.90',
       groundName: 'Ground',
       tower: '118.30',
@@ -457,6 +538,7 @@ class TrafficWorld extends EventEmitter {
     const next = this.radio.releaseNext();
 
     if (next) {
+      this.radio.setBusy('ai', true);
       this.emit('radio', next);
     }
 
@@ -569,7 +651,8 @@ class TrafficWorld extends EventEmitter {
 
         if (ev) {
           this.queueRadio(ev);
-          ac.radioCooldownUntil = Date.now() + this.radioCooldown(ac.phase);
+          ac.radioCooldownUntil =
+            Date.now() + this.radioCooldown(ac.phase);
         }
       }
     }
@@ -579,7 +662,7 @@ class TrafficWorld extends EventEmitter {
   }
 
   normalizeGroundStateIfNeeded(ac) {
-    if (!ac) return;
+    if (!ac || !ac.adsb) return;
 
     const groundPhases = new Set([
       'PRE_FLIGHT',
@@ -593,13 +676,7 @@ class TrafficWorld extends EventEmitter {
       'SHUTDOWN'
     ]);
 
-    if (!groundPhases.has(ac.phase)) {
-      return;
-    }
-
-    if (!ac.adsb) {
-      return;
-    }
+    if (!groundPhases.has(ac.phase)) return;
 
     if (ac.phase === 'TAXI_OUT' || ac.phase === 'TAXI_IN') {
       ac.adsb.altitude = 0;
@@ -649,7 +726,7 @@ class TrafficWorld extends EventEmitter {
   }
 
   radioCooldown(phase) {
-    if (['ENROUTE'].includes(phase)) return 45000;
+    if (phase === 'ENROUTE') return 45000;
 
     if (['TAXI_OUT', 'SID_CLIMB', 'STAR_ARRIVAL'].includes(phase)) {
       return 26000;
@@ -680,7 +757,7 @@ class TrafficWorld extends EventEmitter {
   snapshot() {
     return {
       ok: true,
-      version: 'traffic-v2.0.1-ai-routes-independent',
+      version: 'traffic-v2.0.2-ai-routes-independent-ga-fixed',
       running: this.running,
       aircraftCount: this.aircraft.size,
       aircraft: Array.from(this.aircraft.values()).map((a) => ({
