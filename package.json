@@ -2,8 +2,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/aal318_conversation.test.mjs",
-    "test:aal318": "node tests/aal318_conversation.test.mjs"
+    "test:volanta": "node tests/volanta_bridge.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

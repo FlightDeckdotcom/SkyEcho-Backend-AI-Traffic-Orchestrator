@@ -1,51 +1,31 @@
-SkyEcho Backend v1.2.1 — dependency hotfix for csv-parse/sync on Render.
+# SkyEchoCabin Volanta Bridge v6.9.54 UltraStrict
 
-# SkyEcho Backend v1.2.1 — Safe Boot + Lazy GitHub CSV NavData
+Use FS2EFB as source of truth. Volanta is optional session/tracking/logging.
 
-This version fixes Render `Exited with status 134` by **not downloading/parsing the large GitHub CSV navdata during startup**.
+Copy these files into your repo:
 
-It boots from small local starter CSV files first, then lets you sync GitHub navdata after the service is live.
+- server.js
+- package.json
+- src/connectors/volantaBridge.js
+- tests/volanta_bridge.test.mjs
 
-## Render
-Build Command:
-```bash
-corepack enable && yarn install
-```
-Start Command:
-```bash
-npm start
-```
+Render env:
 
-## Environment
-```txt
-NODE_VERSION=20.18.1
-PORT=10000
-BRIDGE_SECRET=choose_a_private_secret
-DEFAULT_AIRPORT=TAPA
-DEFAULT_DENSITY=3
-NAVDATA_BASE_URL=https://raw.githubusercontent.com/FlightDeckdotcom/SKYECHOCABIN-Discord-Bot/main/data
-PREFER_REMOTE_NAVDATA=false
-```
+FS2EFB_URL=http://your-fs2efb-endpoint
+SIMBRIEF_USER_ID=your_simbrief_id
+VOLANTA_MODE=standby
+VOLANTA_WEBHOOK_URL=
+VOLANTA_API_URL=
+VOLANTA_API_KEY=
 
-Keep `PREFER_REMOTE_NAVDATA=false` for v1.2.1. Use `/data/sync` after startup.
+Routes:
 
-## Test
-```txt
-/health
-/data/status
-```
-
-## Sync GitHub CSV navdata
-POST `/data/sync` with header `x-bridge-secret`.
-
-Body:
-```json
-{ "mode":"boot" }
-```
-
-Boot mode loads a safe subset: airports, runways, frequencies, navaids, taxiways, aprons, ATS routes, designated points.
-
-Full mode exists but should be used only after the backend is stable:
-```json
-{ "mode":"full", "timeoutMs": 12000, "maxBytes": 6000000 }
-```
+GET /volanta/health
+POST /volanta/session/start
+POST /volanta/session/stop
+GET /volanta/session
+GET /volanta/snapshot
+POST /volanta/telemetry
+GET /api/fs2efb
+GET /traffic-v2/health
+GET /traffic-v2/state
