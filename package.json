@@ -1,9 +1,9 @@
-{"type":"module","scripts":{"test:aal318":"node tests/aal318_conversation.test.mjs"}}
 {
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/aal318_conversation.test.mjs"
+    "test": "node tests/aal318_conversation.test.mjs",
+    "test:aal318": "node tests/aal318_conversation.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
