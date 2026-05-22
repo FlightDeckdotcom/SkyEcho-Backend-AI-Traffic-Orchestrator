@@ -2,7 +2,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test:volanta": "node tests/volanta_bridge.test.mjs"
+    "test": "node tests/core_engine.test.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -1,31 +1,24 @@
-# SkyEchoCabin Volanta Bridge v6.9.54 UltraStrict
+# SkyEchoCabin Core Engine v6.9.57 UltraStrict
 
-Use FS2EFB as source of truth. Volanta is optional session/tracking/logging.
+Architecture:
+FS2EFB telemetry + SimBrief route/OFP + procedure/nav data + protected ATC state machine + aviation parser + route/phase validation + phraseology engine + optional Volanta/SayIntentions adapters.
 
-Copy these files into your repo:
-
-- server.js
-- package.json
-- src/connectors/volantaBridge.js
-- tests/volanta_bridge.test.mjs
+Replace/add these files in your repo. Keep SayIntentions optional, never core.
 
 Render env:
-
-FS2EFB_URL=http://your-fs2efb-endpoint
-SIMBRIEF_USER_ID=your_simbrief_id
+FS2EFB_URL=
+SIMBRIEF_USER_ID=
 VOLANTA_MODE=standby
-VOLANTA_WEBHOOK_URL=
-VOLANTA_API_URL=
-VOLANTA_API_KEY=
+SAYINTENTIONS_ADAPTER_ENABLED=false
+SAYINTENTIONS_SIMAPI_URL=
+SAYINTENTIONS_API_KEY=
 
 Routes:
-
-GET /volanta/health
-POST /volanta/session/start
-POST /volanta/session/stop
-GET /volanta/session
-GET /volanta/snapshot
-POST /volanta/telemetry
-GET /api/fs2efb
-GET /traffic-v2/health
+GET /health
+POST /api/session/start
+POST /api/pilot/transmit
+POST /api/fs2efb/ingest
 GET /traffic-v2/state
+GET /sayintentions/adapter/health
+
+Test: npm test
