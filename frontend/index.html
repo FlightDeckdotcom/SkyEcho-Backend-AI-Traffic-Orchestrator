@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SkyEchoCabin v6.9.62 Procedure-Aware ATC Engine</title><!-- v6.9.46 UltraStrict additive patch loaded. Original v6.9.45 preserved. v6.9.45: Departure readback guard fix: plain check-ins no longer trigger incomplete altitude/direct readback; SID/STAR procedure names skipped as direct-to route fixes. -->
+<title>SkyEchoCabin v6.9.63 No-Climb STAR Guard</title><!-- v6.9.46 UltraStrict additive patch loaded. Original v6.9.45 preserved. v6.9.45: Departure readback guard fix: plain check-ins no longer trigger incomplete altitude/direct readback; SID/STAR procedure names skipped as direct-to route fixes. -->
 <style>
 :root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#020817;color:#f8fafc}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,rgba(34,211,238,.14),transparent 24%),linear-gradient(180deg,#020817,#08111f 45%,#020817)}button,input,select,textarea{font:inherit}button{cursor:pointer}.app-shell{max-width:1440px;margin:0 auto;padding:24px}.hero,.panel,.status-card,.audit-tile,.log,.transcript-box,.crew-box,.readback-box,.phase-badge,.notice{border:1px solid rgba(148,163,184,.22);box-shadow:0 10px 30px #0000003d}.hero{display:flex;justify-content:space-between;align-items:center;gap:18px;background:#020617e6;border-radius:28px;padding:24px;margin-bottom:18px}.hero h1{margin:0;font-size:clamp(2rem,3vw,3rem);color:#fff}.hero p{margin:8px 0 0;color:#dbeafe;max-width:720px}.phase-badge{background:#22d3ee24;color:#cffafe;border-radius:999px;padding:12px 18px;font-weight:700}.top-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px}.status-card{background:#080f1ef5;border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:8px}.status-card svg{color:#67e8f9}.status-card span{color:#cbd5e1;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}.status-card strong{color:#fff;font-size:1.05rem}.main-grid{display:grid;grid-template-columns:1.35fr .95fr;gap:18px}.sidebar{display:flex;flex-direction:column;gap:18px}.panel{background:#020617eb;border-radius:28px;padding:20px}.panel.compact{padding:18px}.panel-header{display:flex;align-items:center;gap:10px;margin-bottom:16px}.panel-header.spaced{margin-top:18px}.panel-header h2{margin:0;font-size:1.15rem;color:#fff}.panel-header svg{color:#67e8f9}.ptt{width:100%;min-height:230px;border-radius:32px;padding:20px;border:1px solid rgba(255,255,255,.24);display:flex;flex-direction:column;justify-content:center;gap:20px;transition:transform .15s ease,filter .15s ease}.ptt:hover{filter:brightness(1.04)}.ptt:active{transform:scale(.99)}.ptt.idle{background:#fff;color:#0f172a}.ptt.transmitting{background:#10b981;color:#fff}.ptt.receiving{background:#0ea5e9;color:#fff}.ptt-head{display:flex;align-items:center;justify-content:center;gap:14px;font-size:1.5rem;font-weight:800}.readback-box{background:#02061738;border-radius:24px;padding:16px;max-width:920px;margin:0 auto;text-align:center}.readback-box small{text-transform:uppercase;letter-spacing:.18em;display:block;margin-bottom:8px;color:inherit;opacity:.9}.readback-box p{margin:0;font-size:1rem;font-weight:700;line-height:1.45}.two-col,.mic-grid,.form-grid,.audit-grid{display:grid;gap:14px}.two-col{grid-template-columns:repeat(2,1fr)}.mic-grid{grid-template-columns:repeat(3,1fr)}.form-grid,.audit-grid{grid-template-columns:repeat(2,1fr)}label{display:block;margin-bottom:8px;color:#f8fafc;font-size:.92rem;font-weight:700;text-transform:capitalize}input,select,textarea{width:100%;background:#0f172a;color:#f8fafc;border:1px solid rgba(148,163,184,.22);border-radius:16px;padding:12px 14px}textarea{min-height:118px;resize:vertical}input::placeholder,textarea::placeholder{color:#94a3b8}.transcript-box,.crew-box{background:#0f172a;color:#fff;border-radius:16px;padding:14px;min-height:118px}.crew-box{min-height:auto}.controls-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}.primary,.secondary,.upload-btn{border:0;border-radius:16px;padding:12px 16px;font-weight:800}.primary{background:#67e8f9;color:#082f49}.secondary,.upload-btn{background:#1e293b;color:#f8fafc;border:1px solid rgba(148,163,184,.2)}.upload-btn{display:inline-flex;align-items:center;gap:8px}.meter-wrap{margin-top:14px}.meter-label{display:flex;justify-content:space-between;color:#dbeafe;margin-bottom:8px}.meter{height:14px;width:100%;background:#0f172a;border-radius:999px;overflow:hidden;border:1px solid rgba(148,163,184,.2)}.meter-fill{height:100%;background:linear-gradient(90deg,#22d3ee,#10b981)}.notice{margin-top:14px;border-radius:16px;padding:12px 14px;display:flex;align-items:center;gap:8px}.notice.success{background:#10b98124;color:#d1fae5}.notice.warning{background:#f59e0b24;color:#fde68a}.audit-tile{background:#0f172a;border-radius:16px;padding:14px}.audit-tile span{display:block;color:#cbd5e1;margin-bottom:4px;text-transform:capitalize}.audit-tile strong{color:#fff}.logs-panel{margin-top:18px}.logs-wrap{display:flex;flex-direction:column;gap:12px;max-height:430px;overflow:auto}.log{border-radius:18px;padding:14px}.log-meta{display:flex;justify-content:space-between;color:#cbd5e1;text-transform:uppercase;letter-spacing:.08em;font-size:.72rem;margin-bottom:6px}.log-atc{background:#0ea5e91f}.log-pilot{background:#10b9811f}.log-crew{background:#a855f71f}.log-network{background:#22d3ee1f}.log-system{background:#1e293beb}@media (max-width: 1100px){.top-grid{grid-template-columns:repeat(2,1fr)}.main-grid{grid-template-columns:1fr}}@media (max-width: 760px){.app-shell{padding:14px}.hero{flex-direction:column;align-items:flex-start}.two-col,.mic-grid,.form-grid,.audit-grid,.top-grid{grid-template-columns:1fr}.ptt-head{font-size:1.2rem}}.eleven-grid,.inline-note{margin-bottom:14px}.inline-submit{display:flex;gap:10px;align-items:stretch}.inline-submit textarea{flex:1}.inline-field{display:flex;gap:10px;align-items:center}.inline-field input{flex:1}.enter-btn,.small-btn{white-space:nowrap;display:inline-flex;align-items:center;gap:6px}.small-btn{padding-inline:16px}@media (max-width: 900px){.inline-submit,.inline-field{flex-direction:column}}
 
@@ -5277,6 +5277,138 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
 })();
 
 </script>
+
+<script id="skyecho-v6963-no-climb-star-guard-js">
+(function(){
+  "use strict";
+  if(window.__SkyEchoNoClimbStarGuardV6963)return;
+  window.__SkyEchoNoClimbStarGuardV6963=true;
+
+  const PROC_RE=/\b[A-Z]{2,6}\d[A-Z]?\b/;
+  const SPEED_LEVEL_RE=/^(?:N\d{4}F\d{2,3}|K\d{4}F\d{2,3}|M\d{3}F\d{2,3}|F\d{2,3}|FL\d{2,3})$/i;
+  const AIRWAY_RE=/^(?:Q|J|V|Y|A|B|G|L|M|N|P|R|T|UL|UM|UN|UP|UR|UT|UW|BR)\d{1,4}[A-Z]?$/i;
+  const FIX_RE=/^[A-Z]{3,5}$/;
+
+  function digits(v){return String(v||"").replace(/[^0-9]/g,"").split("").map(d=>({0:"zero",1:"one",2:"two",3:"three",4:"four",5:"five",6:"six",7:"seven",8:"eight",9:"niner"}[d]||d)).join(" ")}
+  function altimeterFor(arr){return String(arr||"").toUpperCase()==="TKPK"?"three zero zero two":"two niner niner two"}
+  function callsign(){
+    const fp=window.__skyechoFlightPlan||{};
+    const cs=(fp.callsign||localStorage.getItem('skyecho_callsign')||'UAL2324').toUpperCase().replace(/\s+/g,'');
+    const m=cs.match(/^([A-Z]{2,3})(\d{1,4}[A-Z]?)$/);
+    if(!m)return cs;
+    const airline={UAL:'United',AAL:'American',DAL:'Delta',BWA:'Caribbean',JBU:'JetBlue'}[m[1]]||m[1];
+    return airline+' '+m[2].split('').map(d=>({0:'zero',1:'one',2:'two',3:'three',4:'four',5:'five',6:'six',7:'seven',8:'eight',9:'niner'}[d]||d)).join(' ');
+  }
+  function pageText(){try{return Array.from(document.querySelectorAll('input,textarea,select')).map(x=>x.value||'').join(' ')}catch{return ''}}
+  function flightPlan(){
+    const fp=window.__skyechoFlightPlan||{};
+    const txt=pageText();
+    return {
+      callsign:fp.callsign||localStorage.getItem('skyecho_callsign')||'UAL2324',
+      arrival:fp.arrival||fp.destination||localStorage.getItem('skyecho_arrival')||'',
+      star:(fp.star||localStorage.getItem('skyecho_star')||''),
+      route:fp.route||localStorage.getItem('skyecho_route')||txt,
+      requestedApproach:fp.requestedApproach||localStorage.getItem('skyecho_requested_approach')||'ILS',
+      arrRunway:fp.arrRunway||localStorage.getItem('skyecho_arr_runway')||'09'
+    }
+  }
+  function telemetry(){const t=window.__skyechoTelemetryState||window.__skyechoLastKnownTelemetry||{};return {altitude:Number(t.altitude??t.alt??0),verticalSpeed:Number(t.verticalSpeed??t.vs??0),distanceToDestination:Number(t.distanceToDestination??t.distToDest??t.distance??999),heading:Number(t.heading??t.hdg??0)}}
+  function routeTokens(route){return String(route||'').toUpperCase().split(/[\s,]+/).map(x=>x.replace(/[^A-Z0-9]/g,'')).filter(Boolean).filter(x=>!SPEED_LEVEL_RE.test(x)&&x!=='DCT')}
+  function isFix(t){return FIX_RE.test(String(t||'').toUpperCase())&&!AIRWAY_RE.test(t)&&!/\d/.test(t)}
+  function inferStar(fp){
+    if(fp.star)return String(fp.star).toUpperCase();
+    const toks=routeTokens(fp.route);
+    const procs=toks.filter(t=>PROC_RE.test(t)&&!SPEED_LEVEL_RE.test(t));
+    return (procs[procs.length-1]||'').toUpperCase();
+  }
+  function lastFixBeforeStar(fp,star){
+    const toks=routeTokens(fp.route); const idx=toks.indexOf(star);
+    if(idx<0)return '';
+    for(let i=idx-1;i>=0;i--)if(isFix(toks[i]))return toks[i];
+    return '';
+  }
+  function mentionedFix(text,fp){
+    const toks=routeTokens(fp.route).filter(isFix); const u=String(text||'').toUpperCase();
+    return toks.find(f=>new RegExp('\\b'+f+'\\b','i').test(u))||'';
+  }
+  function runwayWords(rwy){const s=String(rwy||'09').replace(/^RWY/i,'').toUpperCase().padStart(2,'0'); const nums=s.replace(/[LRC]$/,''); const side=s.endsWith('L')?' left':s.endsWith('R')?' right':s.endsWith('C')?' center':''; return digits(nums)+side}
+  function isStarContext(pilot,fp,tel){
+    const star=inferStar(fp); const u=String(pilot||'').toUpperCase();
+    const before=lastFixBeforeStar(fp,star);
+    return Boolean(star) && (
+      /\b(STAR|ARRIVAL|DESCEND|DESCENDING|DESCENT|LOWER|READY FOR LOWER)\b/i.test(pilot||'') ||
+      (star && new RegExp('\\b'+star+'\\b','i').test(u)) ||
+      (before && new RegExp('\\b'+before+'\\b','i').test(u)) ||
+      Number(tel.distanceToDestination)<=120 || Number(tel.verticalSpeed)<-200
+    );
+  }
+  function hasBadClimbOnArrival(text){return /\b(climb|climb via|climb and maintain)\b/i.test(text||'')}
+  function hasBadReportProcedure(text,fp){const star=inferStar(fp); return (star&&new RegExp('\\breport\\s+'+star+'\\b','i').test(text||'')) || /\breport\s+(ILS|RNAV|VOR|NDB|VISUAL|LOCALIZER|LOC)\b/i.test(text||'')}
+  function replacementArrivalText(pilot,fp,tel){
+    const star=inferStar(fp)||'arrival'; const before=lastFixBeforeStar(fp,star); const fix=mentionedFix(pilot,fp); const cs=callsign();
+    const app=String(fp.requestedApproach||'ILS').toUpperCase(); const rwy=runwayWords(fp.arrRunway||'09');
+    if(Number(tel.distanceToDestination)<=25){return `${cs}, reduce speed to one eight zero knots. Expect ${app} runway ${rwy} approach. Descend and maintain three thousand.`}
+    if(fix && before && fix===before){return `${cs}, ${fix} copied. Descend via the ${star} arrival. ${fp.arrival||'Destination'} altimeter ${altimeterFor(fp.arrival)}.`}
+    return `${cs}, descend via the ${star} arrival. ${fp.arrival||'Destination'} altimeter ${altimeterFor(fp.arrival)}.`
+  }
+  function guardAtcText(text,pilotOverride){
+    const fp=flightPlan(); const tel=telemetry(); const pilot=pilotOverride||window.__skyechoV6963LastPilot||window.__skyechoProcedureAwareStateV6962?.lastPilotTranscript||'';
+    let s=String(text||'');
+    if(isStarContext(pilot,fp,tel)&&hasBadClimbOnArrival(s)){
+      const repl=replacementArrivalText(pilot,fp,tel);
+      console.warn('[SkyEcho v6.9.63] blocked climb instruction during STAR/arrival context:',s,'=>',repl);
+      return repl;
+    }
+    if(hasBadReportProcedure(s,fp)){
+      const star=inferStar(fp); const app=String(fp.requestedApproach||'ILS').toUpperCase(); const rwy=runwayWords(fp.arrRunway||'09');
+      s=s.replace(new RegExp('\\breport\\s+'+star+'\\b','ig'),`continue via the ${star} arrival`);
+      s=s.replace(/\breport\s+(ILS|RNAV|VOR|NDB|VISUAL|LOCALIZER|LOC)\b/ig,`report established on the final approach course`);
+      if(/report established on the final approach course/i.test(s)&&!/cleared|expect/i.test(s))s+=` Expect ${app} runway ${rwy} approach.`;
+    }
+    return s.replace(/\s+/g,' ').trim();
+  }
+
+  // Wrap processSkyEchoATC so even the new core engine cannot output a climb in STAR/arrival context.
+  if(window.processSkyEchoATC && !window.processSkyEchoATC.__noClimbStarGuardV6963){
+    const old=window.processSkyEchoATC;
+    window.processSkyEchoATC=function(transcript,fp,tel,prior){
+      const result=old(transcript,fp,tel,prior);
+      if(result&&result.atcResponseText){
+        result.atcResponseText=guardAtcText(result.atcResponseText,transcript);
+        if(result.updatedState){result.updatedState.lastAtcText=result.atcResponseText; result.updatedState.noClimbStarGuard='v6.9.63';}
+      }
+      return result;
+    };
+    window.processSkyEchoATC.__noClimbStarGuardV6963=true;
+  }
+
+  // Wrap TTS/Piper requests as final safety net.
+  if(window.fetch && !window.fetch.__noClimbStarGuardV6963){
+    const prev=window.fetch.bind(window);
+    window.fetch=async function(input,init){
+      try{
+        const url=String((input&&input.url)||input||'');
+        if(init&&typeof init.body==='string'){
+          if(/pilot|transmit|intent|atc/i.test(url)||/with you|passing|arrival|star|descend|established/i.test(init.body)) window.__skyechoV6963LastPilot=init.body;
+          if(/piper|tts|voice|speak/i.test(url)){
+            const body=JSON.parse(init.body);
+            if(body&&typeof body.text==='string'){
+              body.text=guardAtcText(body.text);
+              init={...init,body:JSON.stringify(body)};
+            }
+          }
+        }
+      }catch(e){}
+      return prev(input,init);
+    };
+    window.fetch.__noClimbStarGuardV6963=true;
+  }
+
+  document.addEventListener('input',e=>{try{const el=e.target;if(el&&(el.tagName==='INPUT'||el.tagName==='TEXTAREA'))window.__skyechoV6963LastPilot=el.value||''}catch{}},true);
+  console.info('[SkyEcho v6.9.63] No-climb-on-STAR arrival guard installed.');
+})();
+</script>
+
 </body>
 </html>
 
