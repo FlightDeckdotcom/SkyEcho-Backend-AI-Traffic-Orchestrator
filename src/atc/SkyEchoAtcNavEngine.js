@@ -1,39 +1,382 @@
-// SkyEchoCabin ATC Navigation Engine v7.0.0
-// Backend-side telemetry-driven ATC core. No frontend overrides.
+// SkyEchoCabin ATC Navigation Engine v7.0.3 RBV route-progression fix
+// Replace: src/atc/SkyEchoAtcNavEngine.js
+//
+// Fixes the loop where pilot reports RBV and ATC keeps asking/reporting the wrong previous item.
+// Core rules:
+// - N0472F320 / K0830M084 are not fixes.
+// - Airways like Y309/Q430 are not report points.
+// - SIDs/STARs are procedures, not single direct-to fixes.
+// - A reported fix advances the route pointer to the next real fix or STAR.
+// - "Passing RBV" -> acknowledge RBV and instruct next real fix/airway continuation.
+// - "Established on Q430/Y309" -> acknowledge airway, then expect/proceed toward next real fix.
+// - Arrival/descent/STAR report cannot produce a climb instruction.
 
-const PROCEDURE_RE = /^[A-Z]{2,6}\d[A-Z]?$/;
-const AIRWAY_RE = /^[A-Z]{1,2}\d{1,4}[A-Z]?$/;
 const SPEED_LEVEL_RE = /^(N|K)\d{4}(F|M)\d{3}$/i;
-const ICAO_RE = /^[A-Z]{4}$/;
+const AIRWAY_RE = /^[A-Z]{1,2}\d{1,4}[A-Z]?$/;
+const PROC_RE = /^[A-Z]{2,6}\d[A-Z]?$/;
 const FIX_RE = /^[A-Z]{3,6}$/;
-const STAR_WORD_RE = /\b(STAR|ARRIVAL|ARR|DESCENDING|DESCEND|LOWER|TOP OF DESCENT|TOD)\b/i;
-const APPROACH_WORD_RE = /\b(ILS|RNAV|RNP|VOR|NDB|LOCALIZER|LOC|VISUAL|APPROACH|ESTABLISHED|FINAL|GLIDESLOPE|GLIDEPATH)\b/i;
-const GROUND_WORD_RE = /\b(CLEARANCE|IFR CLEARANCE|PUSH|START|TAXI|GATE|RAMP|APRON|HOLD SHORT)\b/i;
-const TOWER_WORD_RE = /\b(HOLDING SHORT|READY FOR DEPARTURE|CLEARED FOR TAKEOFF|TAKEOFF|CLEARED TO LAND|LANDING|VACATE|EXIT RUNWAY)\b/i;
+const ICAO_RE = /^[A-Z]{4}$/;
 
-function clean(v){ return String(v ?? '').trim(); }
-function up(v){ return clean(v).toUpperCase(); }
-function finite(v, fallback=null){ const n=Number(v); return Number.isFinite(n)?n:fallback; }
-function bool(v){ if(typeof v==='boolean') return v; if(v==null) return false; return /^(true|1|yes|ground|onground)$/i.test(String(v)); }
-function orInf(v){ const n=finite(v); return n==null?Number.POSITIVE_INFINITY:n; }
-function clamp360(h){ const n=finite(h,0); return ((Math.round(n)%360)+360)%360; }
-function heading3(h){ const n=clamp360(h); return String(n===0?360:n).padStart(3,'0'); }
-function wordDigits(s){ const map={0:'zero',1:'one',2:'two',3:'three',4:'four',5:'five',6:'six',7:'seven',8:'eight',9:'niner'}; return String(s).split('').map(ch=>map[ch]||ch).join(' '); }
-function spokenHeading(h){ return 'heading '+wordDigits(heading3(h)); }
-function spokenRunway(rwy){ const raw=up(rwy).replace(/^RWY\s*/,'').replace(/^RUNWAY\s*/,''); const m=raw.match(/^(\d{1,2})([LCR])?$/); if(!m) return raw || 'the runway'; const n=m[1].padStart(2,'0'); const side={L:' left',C:' center',R:' right'}[m[2]||'']||''; return 'runway '+wordDigits(n)+side; }
-function spokenAltitude(alt){ const raw=up(String(alt??'')); if(!raw) return ''; if(/^FL\d{2,3}$/.test(raw)) return 'flight level '+wordDigits(raw.replace('FL','')); const n=finite(raw.replace(/[^\d.-]/g,'')); if(n==null) return raw; if(n>=18000) return 'flight level '+wordDigits(String(Math.round(n/100)).padStart(3,'0')); if(n%1000===0) return wordDigits(String(n/1000))+' thousand'; if(n%100===0) return wordDigits(String(Math.floor(n/1000)))+' thousand '+wordDigits(String((n%1000)/100))+' hundred'; return String(Math.round(n)); }
-function formatCallsign(cs){ const c=up(cs); const m=c.match(/^([A-Z]{3})(\d+)$/); if(!m) return c||'Aircraft'; const airline={AAL:'American',UAL:'United',DAL:'Delta',JBU:'JetBlue',BAW:'Speedbird',SWA:'Southwest',SKW:'SkyWest',ASA:'Alaska'}[m[1]]||m[1]; return `${airline} ${wordDigits(m[2])}`; }
+function up(v){ return String(v ?? "").trim().toUpperCase(); }
+function num(v){ const n=Number(v); return Number.isFinite(n)?n:null; }
+function bool(v){ if(typeof v==="boolean") return v; if(v==null) return false; return /^(true|1|yes|ground|onground)$/i.test(String(v)); }
+function cleanCallsign(v){ return up(v).replace(/\s+/g,""); }
 
-function normalizeTelemetry(t={}){ return { source:t.source||'unknown', timestamp:t.timestamp||new Date().toISOString(), callsign:up(t.callsign), latitude:finite(t.latitude), longitude:finite(t.longitude), altitude:finite(t.altitude), heading:finite(t.heading), groundSpeed:finite(t.groundSpeed), indicatedAirspeed:finite(t.indicatedAirspeed), verticalSpeed:finite(t.verticalSpeed), distanceToDestination:finite(t.distanceToDestination), distanceFromOrigin:finite(t.distanceFromOrigin), onGround:bool(t.onGround), com1:t.com1||null, transponder:t.transponder||null, raw:t.raw||t }; }
-function sanitizeRouteToken(token){ let t=up(token).replace(/[(),]/g,'').replace(/^DCT$/i,'').trim(); if(!t) return null; if(SPEED_LEVEL_RE.test(t)) return null; if(/^\d+$/.test(t)) return null; if(/^FL\d{2,3}$/.test(t)) return null; if(/^\d{3,5}FT$/.test(t)) return null; if(/^CI\d+$/i.test(t)) return null; return t; }
-function classifyRouteToken(token, fp={}){ const t=sanitizeRouteToken(token); if(!t) return {token:up(token),type:'discard'}; const sid=up(fp.sid||fp.departureProcedure), star=up(fp.star||fp.arrivalProcedure); if(t===sid&&t) return {token:t,type:'sid'}; if(t===star&&t) return {token:t,type:'star'}; if(PROCEDURE_RE.test(t)) return {token:t,type:'procedure'}; if(AIRWAY_RE.test(t)) return {token:t,type:'airway'}; if(ICAO_RE.test(t)&&(t===up(fp.departure)||t===up(fp.origin)||t===up(fp.arrival)||t===up(fp.destination))) return {token:t,type:'airport'}; if(FIX_RE.test(t)) return {token:t,type:'fix'}; return {token:t,type:'other'}; }
-function parseFlightPlan(input={}){ const fp={...input}; const routeRaw=clean(fp.routeRaw||fp.route||''); const rawTokens=routeRaw.split(/\s+/).map(sanitizeRouteToken).filter(Boolean); const sid=up(fp.sid||fp.departureProcedure||''), star=up(fp.star||fp.arrivalProcedure||''), origin=up(fp.origin||fp.departure||''), destination=up(fp.destination||fp.arrival||''); const classified=rawTokens.map(t=>classifyRouteToken(t,{...fp,sid,star,origin,destination})); const routeTokens=classified.filter(x=>x.type!=='discard').map(x=>x.token); const routeAirways=classified.filter(x=>x.type==='airway').map(x=>x.token); const procedures=Array.from(new Set([sid,...classified.filter(x=>['sid','star','procedure'].includes(x.type)).map(x=>x.token),star].filter(Boolean))); const routeFixes=classified.filter(x=>x.type==='fix').map(x=>x.token).filter(t=>t!==sid&&t!==star); return { callsign:up(fp.callsign||''), aircraft:up(fp.aircraft||''), origin, destination, sid, star, routeRaw, routeTokens, routeFixes, routeAirways, procedures, requestedApproach:up(fp.requestedApproach||fp.approach||''), arrRunway:up(fp.arrRunway||fp.runway||fp.assignedRunway||''), cruiseAltitude:up(fp.cruiseAltitude||fp.cruise||''), assignedSquawk:clean(fp.assignedSquawk||fp.squawk||'') }; }
-function transcriptIntent(transcript='', fp={}){ const text=up(transcript); const wantsDescent=/\b(REQUEST|READY|LIKE|NEED).{0,20}\b(LOWER|DESCENT|DESCEND)\b/.test(text)||/\bDESCENDING\b/.test(text); const onArrival=STAR_WORD_RE.test(text)||(fp.star&&text.includes(fp.star)); const approach=APPROACH_WORD_RE.test(text); const routeReport=/\b(PASSING|OVER|ABEAM|CROSSING|REPORT|ESTABLISHED ON|TRACKING)\b/.test(text); const checkin=/\b(WITH YOU|CHECKING IN|CHECK IN|PASSING|LEVEL|DESCENDING|CLIMBING)\b/.test(text); const ground=GROUND_WORD_RE.test(text); const tower=TOWER_WORD_RE.test(text); let intent='unknown'; if(approach) intent='approach_or_established'; else if(wantsDescent||onArrival) intent='arrival_descent'; else if(routeReport) intent='route_position_report'; else if(ground) intent='ground_request'; else if(tower) intent='tower_request'; else if(checkin) intent='checkin'; return {text,intent,wantsDescent,onArrival,approach,routeReport,checkin,ground,tower}; }
-function deriveTelemetryPhase(flightPlan={}, telemetry={}, transcript='', previousState={}){ const fp=parseFlightPlan(flightPlan); const t=normalizeTelemetry(telemetry||{}); const i=transcriptIntent(transcript,fp); const gs=t.groundSpeed??t.indicatedAirspeed??0, alt=t.altitude, vs=t.verticalSpeed??0, dDest=t.distanceToDestination, dOrig=t.distanceFromOrigin; let phase=previousState.phase||'preflight', controller=previousState.controller||'Clearance', reason='fallback_previous'; if(t.onGround&&gs<5){ phase=i.ground?'push_taxi':'ground'; controller='Ground'; reason='on_ground_low_speed'; } else if(t.onGround&&gs>=5){ phase='taxi'; controller='Ground'; reason='on_ground_taxi_speed'; } else if(!t.onGround&&alt!=null&&alt<=2500&&orInf(dOrig)<=10&&!i.onArrival){ phase='departure'; controller='Tower'; reason='airborne_low_alt_near_origin'; } else if(!t.onGround&&(i.onArrival||i.wantsDescent||(dDest!=null&&dDest<=120&&vs<-100))){ phase=dDest!=null&&dDest<=45?'approach':'arrival'; controller=dDest!=null&&dDest<=45?'Approach':'Center'; reason='arrival_descent_or_star'; } else if(!t.onGround&&dDest!=null&&dDest<=45){ phase='approach'; controller='Approach'; reason='within_approach_range'; } else if(!t.onGround&&dDest!=null&&dDest<=8&&alt!=null&&alt<=3000){ phase='tower_final'; controller='Tower'; reason='short_final_range'; } else if(!t.onGround&&alt!=null&&alt<18000&&vs>100){ phase='climb'; controller='Departure'; reason='climbing_below_center_altitude'; } else if(!t.onGround&&alt!=null&&alt>=10000){ phase='enroute'; controller='Center'; reason='airborne_enroute'; } const prev=previousState.phase||''; if(['arrival','approach','tower_final','approach_pending','approach_cleared'].includes(prev)&&['climb','departure'].includes(phase)&&!t.onGround){ phase=prev==='approach_pending'?'approach':prev; controller=phase==='tower_final'?'Tower':phase==='approach'?'Approach':'Center'; reason='protected_no_arrival_regression'; } if(i.onArrival||i.wantsDescent){ phase=dDest!=null&&dDest<=45?'approach':'arrival'; controller=dDest!=null&&dDest<=45?'Approach':'Center'; reason='transcript_arrival_override'; } return {phase,controller,reason,telemetry:t,flightPlan:fp,intent:i.intent,intentFlags:i}; }
-function expected(tokens,type){ return {type,tokens:tokens.filter(Boolean).map(String)}; }
-function chooseNextFix(fp={},state={}){ const arr=fp.routeFixes||[]; return arr[Math.max(0,state.nextFixIndex||0)]||null; }
-function runwayInterceptHeading(runway,currentHeading=0){ const m=up(runway).match(/(\d{1,2})/); if(!m) return clamp360((finite(currentHeading,90)||90)+30); return clamp360(Number(m[1])*10+30); }
-function makeResponse(transcript='', flightPlan={}, telemetry={}, previousState={}){ const pd=deriveTelemetryPhase(flightPlan,telemetry,transcript,previousState); const fp=pd.flightPlan,t=pd.telemetry; const callsign=formatCallsign(fp.callsign||t.callsign||previousState.callsign); const runway=fp.arrRunway||previousState.assignedRunway||''; const approach=fp.requestedApproach||previousState.requestedApproach||'approach'; let text=`${callsign}, go ahead.`, er=expected([],'none'); let next={...previousState,callsign:fp.callsign||previousState.callsign||t.callsign,phase:pd.phase,controller:pd.controller,lastIntent:pd.intent,lastTelemetry:t,phaseReason:pd.reason}; const it=pd.intentFlags.text; switch(pd.phase){ case 'ground': case 'push_taxi': if(/\b(IFR|CLEARANCE|CLEARED|CLEAR)\b/.test(it)){ const initial=previousState.initialAltitude||'5000'; const dep=fp.sid?` via the ${fp.sid} departure`:''; text=`${callsign}, cleared to ${fp.destination||'destination'}${dep}, then as filed. Climb and maintain ${spokenAltitude(initial)}. Expect ${spokenAltitude(fp.cruiseAltitude||previousState.cruiseAltitude||'FL320')} ten minutes after departure. Squawk ${wordDigits(fp.assignedSquawk||previousState.assignedSquawk||'4660')}.`; er=expected([fp.destination,fp.sid,initial,fp.assignedSquawk||previousState.assignedSquawk||'4660'],'clearance'); next.phase='clearance_issued'; } else if(/\b(PUSH|START|ENGINE)\b/.test(it)){ text=`${callsign}, pushback and startup approved. Report ready to taxi.`; er=expected(['pushback','startup'],'push_start'); next.phase='push_start'; } else text=`${callsign}, say request.`; break; case 'taxi': text=`${callsign}, taxi to ${spokenRunway(runway||previousState.departureRunway||'22R')} via assigned taxi route, hold short.`; er=expected(['taxi',runway||previousState.departureRunway||'runway','hold short'],'taxi'); break; case 'departure': text=`${callsign}, radar contact. ${fp.sid?`Climb via the ${fp.sid} departure`:'Continue departure'}. Maintain ${spokenAltitude(previousState.initialAltitude||'5000')}.`; er=expected([fp.sid||'departure',previousState.initialAltitude||'5000'],'sid_climb'); next.phase='climb'; break; case 'climb': { const nextFix=chooseNextFix(fp,next); const target=fp.cruiseAltitude||previousState.cruiseAltitude||'FL320'; text=`${callsign}, climb and maintain ${spokenAltitude(target)}${nextFix?`, proceed direct ${nextFix}`:''}.`; er=expected([target,nextFix].filter(Boolean),'climb'); next.phase='enroute'; break; } case 'enroute': { const nextFix=chooseNextFix(fp,next); if(pd.intent==='route_position_report'&&nextFix){ text=`${callsign}, roger, continue present routing${fp.star?`, expect the ${fp.star} arrival`:''}.`; er=expected([],'roger'); } else if(pd.intentFlags.wantsDescent||pd.intentFlags.onArrival){ const starText=fp.star?` via the ${fp.star} arrival`:''; text=`${callsign}, descend${starText} and maintain ${spokenAltitude(previousState.arrivalAltitude||'12000')}.`; er=expected([fp.star,previousState.arrivalAltitude||'12000'],'descent'); next.phase='arrival'; } else { text=`${callsign}, radar contact. Continue as filed${nextFix?`, report ${nextFix}`:''}.`; er=expected(nextFix?[nextFix]:[],'route_report'); } break; } case 'arrival': { const star=fp.star; const altv=previousState.arrivalAltitude||(t.distanceToDestination!=null&&t.distanceToDestination<80?'8000':'12000'); if(star){ text=`${callsign}, descend via the ${star} arrival. Maintain ${spokenAltitude(altv)}. Expect ${approach} ${runway?spokenRunway(runway):''}.`; er=expected([star,altv],'star_descent'); } else { text=`${callsign}, descend and maintain ${spokenAltitude(altv)}. Expect ${approach} ${runway?spokenRunway(runway):''}.`; er=expected([altv],'descent'); } next.phase='approach_pending'; break; } case 'approach': { const baseAlt=previousState.approachAltitude||'3000'; const hdg=previousState.interceptHeading||runwayInterceptHeading(runway,t.heading); if(pd.intentFlags.approach&&/\bESTABLISHED\b/.test(it)){ text=`${callsign}, roger, contact tower${previousState.towerFrequency?` ${previousState.towerFrequency}`:''}.`; er=expected([previousState.towerFrequency].filter(Boolean),'tower_handoff'); next.phase='tower_final'; } else { text=`${callsign}, fly ${spokenHeading(hdg)}, maintain ${spokenAltitude(baseAlt)} until established, cleared ${approach} ${runway?spokenRunway(runway):'approach'}.`; er=expected([String(hdg),baseAlt,approach,runway].filter(Boolean),'approach_clearance'); next.phase='approach_cleared'; } break; } case 'tower_final': text=`${callsign}, ${runway?spokenRunway(runway):'runway'}, cleared to land.`; er=expected(['cleared to land',runway].filter(Boolean),'landing'); break; default: text=`${callsign}, say request.`; } next.expectedReadback=er.tokens; next.expectedReadbackType=er.type; next.lastAtcTransmission=text; next.updatedAt=new Date().toISOString(); return {ok:true,atcResponseText:text.replace(/\s+/g,' ').trim(),updatedState:next,debug:{phase:pd.phase,controller:pd.controller,reason:pd.reason,intent:pd.intent,route:{routeTokens:fp.routeTokens,routeFixes:fp.routeFixes,routeAirways:fp.routeAirways,procedures:fp.procedures,sid:fp.sid,star:fp.star},telemetry:t}}; }
-function validateReadback(transcript='',tokens=[]){ const text=up(transcript); const missing=[]; for(const tok of tokens||[]){ const t=up(tok); if(!t) continue; if(/^\d{3}$/.test(t)){ const val=Number(t), nums=(text.match(/\b\d{2,3}\b/g)||[]).map(Number); if(!nums.some(n=>Math.abs(n-val)<=5)) missing.push(t); } else if(/^FL\d{2,3}$/.test(t)){ const fl=t.replace('FL',''); if(!text.includes(t)&&!text.includes(fl)&&!text.includes(`FLIGHT LEVEL ${Number(fl)}`)) missing.push(t); } else if(!text.includes(t)) missing.push(t); } return {ok:missing.length===0,missing}; }
-export { parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry, deriveTelemetryPhase, transcriptIntent, makeResponse, validateReadback, spokenAltitude, spokenHeading, spokenRunway };
-export default { parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry, deriveTelemetryPhase, transcriptIntent, makeResponse, validateReadback };
+function wordDigits(s){
+  const m={"0":"zero","1":"one","2":"two","3":"three","4":"four","5":"five","6":"six","7":"seven","8":"eight","9":"niner"};
+  return String(s).split("").map(x=>m[x]||x).join(" ");
+}
+function spokenAltitude(a){
+  const raw=up(a);
+  if(/^FL\d{2,3}$/.test(raw)) return "flight level "+wordDigits(raw.replace("FL",""));
+  const n=num(String(a).replace(/[^\d.-]/g,""));
+  if(n==null) return raw || "";
+  if(n>=18000) return "flight level "+wordDigits(String(Math.round(n/100)).padStart(3,"0"));
+  if(n%1000===0) return wordDigits(n/1000)+" thousand";
+  if(n%100===0) return wordDigits(Math.floor(n/1000))+" thousand "+wordDigits((n%1000)/100)+" hundred";
+  return String(Math.round(n));
+}
+function heading3(h){ const n=((Math.round(num(h)??0)%360)+360)%360 || 360; return String(n).padStart(3,"0"); }
+function spokenHeading(h){ return "heading "+wordDigits(heading3(h)); }
+function spokenRunway(r){
+  const raw=up(r).replace(/^RWY\s*/,"").replace(/^RUNWAY\s*/,"");
+  const m=raw.match(/^(\d{1,2})([LCR])?$/);
+  if(!m) return raw?("runway "+raw):"runway";
+  const side={L:" left",C:" center",R:" right"}[m[2]||""]||"";
+  return "runway "+wordDigits(m[1].padStart(2,"0"))+side;
+}
+function formatCallsign(cs){
+  const c=cleanCallsign(cs);
+  const m=c.match(/^([A-Z]{3})(\d+)$/);
+  if(!m) return c || "Aircraft";
+  const airline={UAL:"United",AAL:"American",DAL:"Delta",JBU:"JetBlue",BAW:"Speedbird",SWA:"Southwest",ASA:"Alaska",SKW:"SkyWest"}[m[1]]||m[1];
+  return airline+" "+wordDigits(m[2]);
+}
+
+function sanitizeRouteToken(tok){
+  const t=up(tok).replace(/[(),]/g,"");
+  if(!t || t==="DCT") return null;
+  if(SPEED_LEVEL_RE.test(t)) return null;
+  if(/^FL\d{2,3}$/.test(t)) return null;
+  if(/^\d+$/.test(t)) return null;
+  return t;
+}
+function classifyRouteToken(tok, fp={}){
+  const t=sanitizeRouteToken(tok);
+  if(!t) return {token:up(tok),type:"discard"};
+  const sid=up(fp.sid||fp.departureProcedure), star=up(fp.star||fp.arrivalProcedure);
+  const origin=up(fp.origin||fp.departure), dest=up(fp.destination||fp.arrival);
+  if(t===sid && sid) return {token:t,type:"sid"};
+  if(t===star && star) return {token:t,type:"star"};
+  if(ICAO_RE.test(t) && (t===origin||t===dest)) return {token:t,type:"airport"};
+  if(PROC_RE.test(t)) return {token:t,type:"procedure"};
+  if(AIRWAY_RE.test(t)) return {token:t,type:"airway"};
+  if(FIX_RE.test(t)) return {token:t,type:"fix"};
+  return {token:t,type:"other"};
+}
+function parseFlightPlan(input={}){
+  const routeRaw=String(input.routeRaw||input.route||"");
+  const sid=up(input.sid||input.departureProcedure||"");
+  const star=up(input.star||input.arrivalProcedure||"");
+  const origin=up(input.origin||input.departure||"");
+  const destination=up(input.destination||input.arrival||"");
+  const tokens=routeRaw.split(/\s+/).map(sanitizeRouteToken).filter(Boolean);
+  const cls=tokens.map(t=>classifyRouteToken(t,{...input,sid,star,origin,destination}));
+  return {
+    callsign:cleanCallsign(input.callsign||""),
+    aircraft:up(input.aircraft||""),
+    origin,destination,sid,star,routeRaw,
+    routeTokens:cls.filter(x=>x.type!=="discard").map(x=>x.token),
+    routeClassified:cls,
+    routeFixes:cls.filter(x=>x.type==="fix").map(x=>x.token),
+    routeAirways:cls.filter(x=>x.type==="airway").map(x=>x.token),
+    procedures:[...new Set([sid,...cls.filter(x=>["sid","star","procedure"].includes(x.type)).map(x=>x.token),star].filter(Boolean))],
+    requestedApproach:up(input.requestedApproach||input.approach||""),
+    arrRunway:up(input.arrRunway||input.runway||input.assignedRunway||""),
+    cruiseAltitude:up(input.cruiseAltitude||input.cruise||""),
+    assignedSquawk:String(input.assignedSquawk||input.squawk||"")
+  };
+}
+function normalizeTelemetry(t={}){
+  return {
+    source:t.source||"unknown", timestamp:t.timestamp||new Date().toISOString(),
+    callsign:cleanCallsign(t.callsign), latitude:num(t.latitude), longitude:num(t.longitude),
+    altitude:num(t.altitude), heading:num(t.heading),
+    groundSpeed:num(t.groundSpeed), indicatedAirspeed:num(t.indicatedAirspeed),
+    verticalSpeed:num(t.verticalSpeed), distanceToDestination:num(t.distanceToDestination),
+    distanceFromOrigin:num(t.distanceFromOrigin), onGround:bool(t.onGround),
+    com1:t.com1||null, transponder:t.transponder||null, raw:t.raw||t
+  };
+}
+function transcriptIntent(transcript="", fp={}){
+  const text=up(transcript);
+  const wantsDescent=/\b(REQUEST|READY|LIKE|NEED).{0,35}\b(LOWER|DESCENT|DESCEND)\b/.test(text)||/\bDESCENDING\b/.test(text);
+  const onArrival=/\b(STAR|ARRIVAL|DESCENDING|DESCEND|LOWER|TOD|TOP OF DESCENT)\b/.test(text)||(fp.star&&text.includes(fp.star));
+  const approach=/\b(ILS|RNAV|RNP|VOR|LOCALIZER|LOC|VISUAL|APPROACH|ESTABLISHED|FINAL|GLIDESLOPE|GLIDEPATH)\b/.test(text);
+  const routeReport=/\b(PASSING|OVER|ABEAM|CROSSING|ESTABLISHED ON|TRACKING|ON THE|JOINING|DIRECT)\b/.test(text);
+  const checkin=/\b(WITH YOU|CHECKING IN|PASSING|LEVEL|CLIMBING|DESCENDING)\b/.test(text);
+  let intent="unknown";
+  if(approach) intent="approach_or_established";
+  else if(wantsDescent||onArrival) intent="arrival_descent";
+  else if(routeReport) intent="route_position_report";
+  else if(checkin) intent="checkin";
+  return {text,wantsDescent,onArrival,approach,routeReport,checkin,intent};
+}
+function deriveTelemetryPhase(flightPlan={}, telemetry={}, transcript="", state={}){
+  const fp=parseFlightPlan(flightPlan), t=normalizeTelemetry(telemetry), i=transcriptIntent(transcript,fp);
+  const gs=t.groundSpeed??t.indicatedAirspeed??0, alt=t.altitude, vs=t.verticalSpeed??0, dd=t.distanceToDestination;
+  let phase=state.phase||"preflight", controller=state.controller||"Clearance", reason="previous";
+  if(t.onGround && gs<5){ phase="ground"; controller="Ground"; reason="on_ground"; }
+  else if(t.onGround){ phase="taxi"; controller="Ground"; reason="taxi"; }
+  else if(i.onArrival||i.wantsDescent){ phase=dd!=null&&dd<=45?"approach":"arrival"; controller=phase==="approach"?"Approach":"Center"; reason="transcript_arrival"; }
+  else if(dd!=null&&dd<=45){ phase="approach"; controller="Approach"; reason="within_approach"; }
+  else if(!t.onGround && alt!=null && alt<18000 && (vs??0)>100){ phase="climb"; controller="Departure"; reason="climb"; }
+  else if(!t.onGround && alt!=null){ phase="enroute"; controller="Center"; reason="airborne"; }
+  if(["arrival","approach","approach_pending","approach_cleared","tower_final"].includes(state.phase||"") && ["climb","departure"].includes(phase) && !t.onGround){
+    phase=(state.phase==="approach_pending"||state.phase==="approach_cleared")?"approach":state.phase;
+    controller=phase==="tower_final"?"Tower":phase==="approach"?"Approach":"Center";
+    reason="protected_no_arrival_regression";
+  }
+  return {phase,controller,reason,flightPlan:fp,telemetry:t,intent:i.intent,intentFlags:i};
+}
+
+// Token recognition including phonetic/STT common failures.
+function findReportedToken(transcript="", fp={}){
+  const text=up(transcript);
+  const items=[...(fp.routeClassified||[])].filter(x=>x.type!=="discard").sort((a,b)=>b.token.length-a.token.length);
+  for(const it of items) if(it.token && text.includes(it.token)) return it;
+
+  const aliases=[
+    {re:/\bROMEO\s+BRAVO\s+VICTOR\b|\bR\s*B\s*V\b|\bRBV\b/, token:"RBV", type:"fix"},
+    {re:/\bQUEBEC\s*(FOUR|4)\s*(THREE|3)\s*(ZERO|0|OH)\b|\bQ\s*430\b|\bQ430\b/, token:"Q430", type:"airway"},
+    {re:/\bYANKEE\s*(THREE|3)\s*(ZERO|0|OH)\s*(NINER|9)\b|\bY\s*309\b|\bY309\b/, token:"Y309", type:"airway"}
+  ];
+  for(const a of aliases) if(a.re.test(text)) return {token:a.token,type:a.type};
+  return null;
+}
+function routeIndexOf(fp, token){
+  if(!token) return -1;
+  return (fp.routeClassified||[]).findIndex(x=>x.token===token);
+}
+function nextNavItem(fp={}, state={}, reported=null){
+  const cls=fp.routeClassified||[];
+  let idx=-1;
+  if(reported?.token) idx=routeIndexOf(fp, reported.token);
+  if(idx<0 && state.lastReportedToken) idx=routeIndexOf(fp, state.lastReportedToken);
+  if(idx<0 && Number.isFinite(Number(state.nextRouteIndex))) idx=Number(state.nextRouteIndex)-1;
+  for(let i=Math.max(0,idx+1); i<cls.length; i++){
+    const it=cls[i];
+    if(["fix","airway","star"].includes(it.type)) return {...it,index:i};
+  }
+  if(fp.star) return {token:fp.star,type:"star",index:cls.length};
+  return null;
+}
+function nextRealFixOrStar(fp={}, state={}, reported=null){
+  const cls=fp.routeClassified||[];
+  let idx=-1;
+  if(reported?.token) idx=routeIndexOf(fp, reported.token);
+  if(idx<0 && state.lastReportedToken) idx=routeIndexOf(fp,state.lastReportedToken);
+  if(idx<0 && Number.isFinite(Number(state.nextRouteIndex))) idx=Number(state.nextRouteIndex)-1;
+  for(let i=Math.max(0,idx+1); i<cls.length; i++){
+    const it=cls[i];
+    if(["fix","star"].includes(it.type)) return {...it,index:i};
+  }
+  if(fp.star) return {token:fp.star,type:"star",index:cls.length};
+  return null;
+}
+function expected(tokens,type){return{type,tokens:tokens.filter(Boolean).map(String)};}
+
+function routeReportResponse(callsign, fp, state, reported){
+  const nextAny=nextNavItem(fp,state,reported);
+  const nextFix=nextRealFixOrStar(fp,state,reported);
+  const update={lastReportedToken:reported?.token||state.lastReportedToken||null};
+
+  if(reported?.type==="fix"){
+    update.nextRouteIndex=(nextAny?.index??routeIndexOf(fp,reported.token)+1)+1;
+    if(nextAny?.type==="airway"){
+      return {text:`${callsign}, ${reported.token} copied. Join airway ${nextAny.token}${nextFix?.token?` toward ${nextFix.token}`:""}.`, expectedReadback:expected([nextAny.token],"join_airway"), update};
+    }
+    if(nextFix?.type==="fix"){
+      return {text:`${callsign}, ${reported.token} copied. Proceed direct ${nextFix.token}, then resume own navigation.`, expectedReadback:expected([nextFix.token],"direct_next_fix"), update};
+    }
+    if(nextFix?.type==="star"){
+      return {text:`${callsign}, ${reported.token} copied. Continue as filed, expect the ${nextFix.token} arrival.`, expectedReadback:expected([],"arrival_expect"), update};
+    }
+    return {text:`${callsign}, ${reported.token} copied. Continue as filed.`, expectedReadback:expected([],"roger"), update};
+  }
+
+  if(reported?.type==="airway"){
+    update.nextRouteIndex=(nextAny?.index??routeIndexOf(fp,reported.token)+1)+1;
+    if(nextFix?.type==="fix"){
+      return {text:`${callsign}, roger, established on airway ${reported.token}. Continue via ${reported.token} toward ${nextFix.token}.`, expectedReadback:expected([],"roger"), update};
+    }
+    if(nextFix?.type==="star"){
+      return {text:`${callsign}, roger, established on airway ${reported.token}. Continue as filed, expect the ${nextFix.token} arrival.`, expectedReadback:expected([],"roger"), update};
+    }
+    return {text:`${callsign}, roger, established on airway ${reported.token}. Continue as filed.`, expectedReadback:expected([],"roger"), update};
+  }
+
+  if(reported?.type==="star"){
+    const alt=state.arrivalAltitude||"12000";
+    return {text:`${callsign}, roger, continue the ${reported.token} arrival. Descend and maintain ${spokenAltitude(alt)}.`, expectedReadback:expected([alt],"star_descent"), update:{...update,phase:"arrival"}};
+  }
+
+  if(nextAny?.type==="airway"){
+    return {text:`${callsign}, roger. Join airway ${nextAny.token}${nextFix?.token?` toward ${nextFix.token}`:""}.`, expectedReadback:expected([nextAny.token],"join_airway"), update:{nextRouteIndex:nextAny.index+1}};
+  }
+  if(nextFix?.type==="fix"){
+    return {text:`${callsign}, roger. Proceed direct ${nextFix.token}, then resume own navigation.`, expectedReadback:expected([nextFix.token],"direct_next_fix"), update:{nextRouteIndex:nextFix.index+1}};
+  }
+  return {text:`${callsign}, roger, position copied.`, expectedReadback:expected([],"roger"), update};
+}
+function runwayInterceptHeading(runway,current=90){
+  const m=up(runway).match(/(\d{1,2})/);
+  if(!m) return ((Math.round(num(current)??90)+30)%360)||360;
+  return ((Number(m[1])*10+30)%360)||360;
+}
+
+function makeResponse(transcript="", flightPlan={}, telemetry={}, previousState={}){
+  const ph=deriveTelemetryPhase(flightPlan,telemetry,transcript,previousState);
+  const fp=ph.flightPlan, t=ph.telemetry, flags=ph.intentFlags;
+  const callsign=formatCallsign(fp.callsign||t.callsign||previousState.callsign);
+  const reported=findReportedToken(transcript,fp);
+  const runway=fp.arrRunway||previousState.assignedRunway||"";
+  const approach=fp.requestedApproach||previousState.requestedApproach||"approach";
+
+  let text=`${callsign}, say request.`;
+  let er=expected([],"none");
+  let st={...previousState,callsign:fp.callsign||previousState.callsign||t.callsign,phase:ph.phase,controller:ph.controller,lastIntent:ph.intent,lastTelemetry:t,phaseReason:ph.reason};
+
+  if(flags.onArrival||flags.wantsDescent){
+    const alt=previousState.arrivalAltitude || (t.distanceToDestination!=null && t.distanceToDestination<80 ? "8000":"12000");
+    if(fp.star){
+      text=`${callsign}, descend via the ${fp.star} arrival. Maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
+      er=expected([fp.star,alt],"star_descent");
+    }else{
+      text=`${callsign}, descend and maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
+      er=expected([alt],"descent");
+    }
+    st.phase="arrival";
+  } else if(ph.phase==="ground"){
+    if(/\b(IFR|CLEARANCE|CLEAR)\b/.test(flags.text)){
+      const initial=previousState.initialAltitude||"5000";
+      text=`${callsign}, cleared to ${fp.destination||"destination"}${fp.sid?` via the ${fp.sid} departure`:""}, then as filed. Climb and maintain ${spokenAltitude(initial)}. Expect ${spokenAltitude(fp.cruiseAltitude||"FL320")} ten minutes after departure. Squawk ${wordDigits(fp.assignedSquawk||"4660")}.`;
+      er=expected([fp.destination,fp.sid,initial,fp.assignedSquawk||"4660"],"clearance");
+      st.phase="clearance_issued";
+    }else if(/\b(PUSH|START|ENGINE)\b/.test(flags.text)){
+      text=`${callsign}, pushback and startup approved. Report ready to taxi.`;
+      er=expected(["pushback","startup"],"push_start");
+      st.phase="push_start";
+    }
+  } else if(ph.phase==="taxi"){
+    text=`${callsign}, taxi to ${spokenRunway(runway||previousState.departureRunway||"22R")} via assigned taxi route, hold short.`;
+    er=expected(["taxi",runway||previousState.departureRunway||"runway","hold short"],"taxi");
+  } else if(ph.phase==="climb"){
+    const next=nextNavItem(fp,st,null);
+    const target=fp.cruiseAltitude||previousState.cruiseAltitude||"FL320";
+    if(next?.type==="airway"){
+      text=`${callsign}, climb and maintain ${spokenAltitude(target)}, join airway ${next.token}.`;
+      er=expected([target,next.token],"climb_join_airway");
+      st.nextRouteIndex=next.index+1;
+    }else if(next?.type==="fix"){
+      text=`${callsign}, climb and maintain ${spokenAltitude(target)}, proceed direct ${next.token}.`;
+      er=expected([target,next.token],"climb_direct");
+      st.nextRouteIndex=next.index+1;
+    }else{
+      text=`${callsign}, climb and maintain ${spokenAltitude(target)}.`;
+      er=expected([target],"climb");
+    }
+    st.phase="enroute";
+  } else if(ph.phase==="enroute"){
+    if(flags.routeReport || reported){
+      const rr=routeReportResponse(callsign,fp,st,reported);
+      text=rr.text; er=rr.expectedReadback; st={...st,...rr.update};
+    }else if(flags.checkin){
+      const next=nextNavItem(fp,st,null);
+      if(next?.type==="airway"){
+        const nextFix=nextRealFixOrStar(fp,st,next);
+        text=`${callsign}, radar contact. Join airway ${next.token}${nextFix?.token?` toward ${nextFix.token}`:""}.`;
+        er=expected([next.token],"join_airway");
+        st.nextRouteIndex=next.index+1;
+      }else if(next?.type==="fix"){
+        text=`${callsign}, radar contact. Proceed direct ${next.token}, then resume own navigation.`;
+        er=expected([next.token],"direct_next_fix");
+        st.nextRouteIndex=next.index+1;
+      }else{
+        text=`${callsign}, radar contact.`;
+        er=expected([],"roger");
+      }
+    }else{
+      const next=nextNavItem(fp,st,null);
+      if(next?.type==="airway"){
+        const nextFix=nextRealFixOrStar(fp,st,next);
+        text=`${callsign}, join airway ${next.token}${nextFix?.token?` toward ${nextFix.token}`:""}.`;
+        er=expected([next.token],"join_airway");
+        st.nextRouteIndex=next.index+1;
+      }else if(next?.type==="fix"){
+        text=`${callsign}, proceed direct ${next.token}, then resume own navigation.`;
+        er=expected([next.token],"direct_next_fix");
+        st.nextRouteIndex=next.index+1;
+      }else{
+        text=`${callsign}, roger.`;
+        er=expected([],"roger");
+      }
+    }
+  } else if(ph.phase==="arrival"){
+    const alt=previousState.arrivalAltitude || (t.distanceToDestination!=null && t.distanceToDestination<80 ? "8000":"12000");
+    if(fp.star){
+      text=`${callsign}, descend via the ${fp.star} arrival. Maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
+      er=expected([fp.star,alt],"star_descent");
+    }else{
+      text=`${callsign}, descend and maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
+      er=expected([alt],"descent");
+    }
+    st.phase="approach_pending";
+  } else if(ph.phase==="approach" || ph.phase==="approach_pending" || ph.phase==="approach_cleared"){
+    if(flags.approach && /\bESTABLISHED\b/.test(flags.text)){
+      text=`${callsign}, roger, contact tower${previousState.towerFrequency?` ${previousState.towerFrequency}`:""}.`;
+      er=expected([previousState.towerFrequency].filter(Boolean),"tower_handoff");
+      st.phase="tower_final";
+    }else{
+      const alt=previousState.approachAltitude||"3000";
+      const hdg=previousState.interceptHeading||runwayInterceptHeading(runway,t.heading);
+      text=`${callsign}, fly ${spokenHeading(hdg)}, maintain ${spokenAltitude(alt)} until established, cleared ${approach} ${runway?spokenRunway(runway):"approach"}.`;
+      er=expected([String(hdg),alt,approach,runway].filter(Boolean),"approach_clearance");
+      st.phase="approach_cleared";
+    }
+  } else if(ph.phase==="tower_final"){
+    text=`${callsign}, ${runway?spokenRunway(runway):"runway"}, cleared to land.`;
+    er=expected(["cleared to land",runway].filter(Boolean),"landing");
+  }
+
+  st.expectedReadback=er.tokens;
+  st.expectedReadbackType=er.type;
+  st.lastAtcTransmission=text.replace(/\s+/g," ").trim();
+  st.updatedAt=new Date().toISOString();
+
+  return {
+    ok:true,
+    atcResponseText:st.lastAtcTransmission,
+    updatedState:st,
+    debug:{version:"7.0.3",phase:st.phase,controller:st.controller,reason:ph.reason,intent:ph.intent,reportedToken:reported,route:{routeTokens:fp.routeTokens,routeFixes:fp.routeFixes,routeAirways:fp.routeAirways,procedures:fp.procedures,routeClassified:fp.routeClassified},telemetry:t}
+  };
+}
+function validateReadback(transcript="", expectedTokens=[]){
+  const text=up(transcript), missing=[];
+  for(const tok of expectedTokens||[]){
+    const t=up(tok);
+    if(!t) continue;
+    if(!text.includes(t)) missing.push(t);
+  }
+  return {ok:missing.length===0,missing};
+}
+
+export {
+  parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry,
+  deriveTelemetryPhase, transcriptIntent, makeResponse, validateReadback,
+  spokenAltitude, spokenHeading, spokenRunway, findReportedToken
+};
+export default {
+  parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry,
+  deriveTelemetryPhase, transcriptIntent, makeResponse, validateReadback
+};
