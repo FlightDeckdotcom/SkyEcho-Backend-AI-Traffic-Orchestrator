@@ -1,15 +1,13 @@
-// SkyEchoCabin ATC Navigation Engine v7.0.3 RBV route-progression fix
+// SkyEchoCabin ATC Navigation Engine v7.0.4 Arrival/Approach State Fix
 // Replace: src/atc/SkyEchoAtcNavEngine.js
 //
-// Fixes the loop where pilot reports RBV and ATC keeps asking/reporting the wrong previous item.
-// Core rules:
-// - N0472F320 / K0830M084 are not fixes.
-// - Airways like Y309/Q430 are not report points.
-// - SIDs/STARs are procedures, not single direct-to fixes.
-// - A reported fix advances the route pointer to the next real fix or STAR.
-// - "Passing RBV" -> acknowledge RBV and instruct next real fix/airway continuation.
-// - "Established on Q430/Y309" -> acknowledge airway, then expect/proceed toward next real fix.
-// - Arrival/descent/STAR report cannot produce a climb instruction.
+// Fixes:
+// - Descent readbacks no longer trigger repeated arrival descents.
+// - "maintain 3000 until established, cleared ILS..." readback no longer means the aircraft is established.
+// - "request descent" while already at/near 12000 gives a lower descent instead of repeating 12000.
+// - Approach clearance readback advances state without re-clearing.
+// - Route progression RBV -> Q430 -> COPES retained from v7.0.3.
+// - Airways are not report points. STAR/SID are not direct-to fixes. N0472F320 is discarded.
 
 const SPEED_LEVEL_RE = /^(N|K)\d{4}(F|M)\d{3}$/i;
 const AIRWAY_RE = /^[A-Z]{1,2}\d{1,4}[A-Z]?$/;
@@ -110,17 +108,23 @@ function normalizeTelemetry(t={}){
 }
 function transcriptIntent(transcript="", fp={}){
   const text=up(transcript);
-  const wantsDescent=/\b(REQUEST|READY|LIKE|NEED).{0,35}\b(LOWER|DESCENT|DESCEND)\b/.test(text)||/\bDESCENDING\b/.test(text);
+  const wantsDescent=/\b(REQUEST|READY|LIKE|NEED).{0,35}\b(LOWER|DESCENT|DESCEND)\b/.test(text)||/\bDESCENDING\b/.test(text)||/\bTOP OF DESCENT\b/.test(text);
   const onArrival=/\b(STAR|ARRIVAL|DESCENDING|DESCEND|LOWER|TOD|TOP OF DESCENT)\b/.test(text)||(fp.star&&text.includes(fp.star));
-  const approach=/\b(ILS|RNAV|RNP|VOR|LOCALIZER|LOC|VISUAL|APPROACH|ESTABLISHED|FINAL|GLIDESLOPE|GLIDEPATH)\b/.test(text);
+  const approach=/\b(ILS|RNAV|RNP|VOR|LOCALIZER|LOC|VISUAL|APPROACH|FINAL|GLIDESLOPE|GLIDEPATH)\b/.test(text)||isActualEstablished(text);
   const routeReport=/\b(PASSING|OVER|ABEAM|CROSSING|ESTABLISHED ON|TRACKING|ON THE|JOINING|DIRECT)\b/.test(text);
-  const checkin=/\b(WITH YOU|CHECKING IN|PASSING|LEVEL|CLIMBING|DESCENDING)\b/.test(text);
+  const checkin=/\b(WITH YOU|CHECKING IN|PASSING|LEVEL|CLIMBING|DESCENDING|MAINTAINING)\b/.test(text);
   let intent="unknown";
   if(approach) intent="approach_or_established";
   else if(wantsDescent||onArrival) intent="arrival_descent";
   else if(routeReport) intent="route_position_report";
   else if(checkin) intent="checkin";
   return {text,wantsDescent,onArrival,approach,routeReport,checkin,intent};
+}
+function isActualEstablished(text){
+  const t=up(text);
+  // "maintain 3000 until established" is a readback, not a position report.
+  if(/\bUNTIL\s+ESTABLISHED\b/.test(t)) return false;
+  return /\b(ESTABLISHED|ON FINAL|FINAL APPROACH|LOCALIZER CAPTURED|GLIDESLOPE CAPTURED|ON THE LOCALIZER)\b/.test(t);
 }
 function deriveTelemetryPhase(flightPlan={}, telemetry={}, transcript="", state={}){
   const fp=parseFlightPlan(flightPlan), t=normalizeTelemetry(telemetry), i=transcriptIntent(transcript,fp);
@@ -139,13 +143,10 @@ function deriveTelemetryPhase(flightPlan={}, telemetry={}, transcript="", state=
   }
   return {phase,controller,reason,flightPlan:fp,telemetry:t,intent:i.intent,intentFlags:i};
 }
-
-// Token recognition including phonetic/STT common failures.
 function findReportedToken(transcript="", fp={}){
   const text=up(transcript);
   const items=[...(fp.routeClassified||[])].filter(x=>x.type!=="discard").sort((a,b)=>b.token.length-a.token.length);
   for(const it of items) if(it.token && text.includes(it.token)) return it;
-
   const aliases=[
     {re:/\bROMEO\s+BRAVO\s+VICTOR\b|\bR\s*B\s*V\b|\bRBV\b/, token:"RBV", type:"fix"},
     {re:/\bQUEBEC\s*(FOUR|4)\s*(THREE|3)\s*(ZERO|0|OH)\b|\bQ\s*430\b|\bQ430\b/, token:"Q430", type:"airway"},
@@ -186,6 +187,82 @@ function nextRealFixOrStar(fp={}, state={}, reported=null){
 }
 function expected(tokens,type){return{type,tokens:tokens.filter(Boolean).map(String)};}
 
+function extractNumbers(text=""){
+  const t=up(text);
+  const nums=[];
+  for(const m of t.matchAll(/\b\d{2,5}\b/g)) nums.push(Number(m[0]));
+  const compact=t.replace(/\s+/g," ");
+  if(/\bONE TWO THOUSAND\b|\bTWELVE THOUSAND\b|\b1 2 THOUSAND\b/.test(compact)) nums.push(12000);
+  if(/\bFLIGHT LEVEL ONE TWO ZERO\b|\bFL ONE TWO ZERO\b|\bFLIGHT LEVEL 120\b|\bFL120\b|\bFL 120\b/.test(compact)) nums.push(12000,120);
+  if(/\bTHREE THOUSAND\b|\b3 THOUSAND\b/.test(compact)) nums.push(3000);
+  if(/\bEIGHT THOUSAND\b|\b8 THOUSAND\b/.test(compact)) nums.push(8000);
+  return nums;
+}
+function isReadbackForExpected(transcript="", state={}, fp={}){
+  const type=state.expectedReadbackType||"";
+  const tokens=(state.expectedReadback||[]).map(up).filter(Boolean);
+  const text=up(transcript);
+  const nums=extractNumbers(text);
+
+  if(!type || type==="none" || !tokens.length) return false;
+
+  let matched=0;
+  for(const tok of tokens){
+    if(text.includes(tok)) { matched++; continue; }
+    const n=num(tok.replace(/[^\d]/g,""));
+    if(n!=null){
+      if(tok.startsWith("FL") && (nums.includes(n) || nums.includes(n*100))) matched++;
+      else if(nums.includes(n)) matched++;
+    }
+  }
+
+  // Descent/approach clearances often contain runway/approach words and altitude; accept if the key numeric/approach pieces are present.
+  if(["descent","star_descent"].includes(type)){
+    return matched>0 && (/\bDESCEND|MAINTAIN|EXPECT|ILS|RNAV|APPROACH|ARRIVAL\b/.test(text));
+  }
+  if(type==="approach_clearance"){
+    return /\b(CLEARED|ILS|RNAV|APPROACH|LOCALIZER|RUNWAY|MAINTAIN|ESTABLISHED)\b/.test(text) && (nums.length>0 || (fp.arrRunway && text.includes(fp.arrRunway)));
+  }
+  if(type==="tower_handoff") return /\b(TOWER|CONTACT|OVER TO)\b/.test(text) || matched>0;
+  return matched>=Math.max(1,Math.ceil(tokens.length*0.5));
+}
+function readbackResponse(callsign, state={}, fp={}, transcript=""){
+  const type=state.expectedReadbackType||"";
+  let phase=state.phase||"enroute";
+  let text=`${callsign}, readback correct.`;
+  let er=expected([],"none");
+  const upd={expectedReadback:[], expectedReadbackType:"none"};
+
+  if(["descent","star_descent"].includes(type)){
+    phase="arrival";
+    text=`${callsign}, readback correct. Continue descent${fp.star?` via the ${fp.star} arrival`:""}.`;
+  } else if(type==="approach_clearance"){
+    phase="approach_cleared";
+    text=`${callsign}, readback correct. Report established on final.`;
+  } else if(type==="tower_handoff"){
+    phase="tower_final";
+    text=`${callsign}, readback correct.`;
+  } else if(type.includes("airway") || type.includes("direct")){
+    phase="enroute";
+    text=`${callsign}, readback correct.`;
+  }
+  upd.phase=phase;
+  return {text, er, upd};
+}
+function chooseLowerAltitude(state={}, telemetry={}){
+  const alt=telemetry.altitude;
+  const last=up(state.lastAssignedAltitude||"");
+  if(alt!=null){
+    if(alt>13000) return "12000";
+    if(alt>9000) return "8000";
+    if(alt>5000) return "3000";
+    return "3000";
+  }
+  if(last==="12000") return "8000";
+  if(last==="8000") return "3000";
+  return state.arrivalAltitude || "12000";
+}
+
 function routeReportResponse(callsign, fp, state, reported){
   const nextAny=nextNavItem(fp,state,reported);
   const nextFix=nextRealFixOrStar(fp,state,reported);
@@ -218,7 +295,7 @@ function routeReportResponse(callsign, fp, state, reported){
 
   if(reported?.type==="star"){
     const alt=state.arrivalAltitude||"12000";
-    return {text:`${callsign}, roger, continue the ${reported.token} arrival. Descend and maintain ${spokenAltitude(alt)}.`, expectedReadback:expected([alt],"star_descent"), update:{...update,phase:"arrival"}};
+    return {text:`${callsign}, roger, continue the ${reported.token} arrival. Descend and maintain ${spokenAltitude(alt)}.`, expectedReadback:expected([alt],"star_descent"), update:{...update,phase:"arrival",lastAssignedAltitude:alt}};
   }
 
   if(nextAny?.type==="airway"){
@@ -247,22 +324,35 @@ function makeResponse(transcript="", flightPlan={}, telemetry={}, previousState=
   let er=expected([],"none");
   let st={...previousState,callsign:fp.callsign||previousState.callsign||t.callsign,phase:ph.phase,controller:ph.controller,lastIntent:ph.intent,lastTelemetry:t,phaseReason:ph.reason};
 
-  if(flags.onArrival||flags.wantsDescent){
-    const alt=previousState.arrivalAltitude || (t.distanceToDestination!=null && t.distanceToDestination<80 ? "8000":"12000");
+  // Highest priority: if the pilot is reading back our last clearance, do not treat it as a new request.
+  if(isReadbackForExpected(transcript, previousState, fp)){
+    const rb=readbackResponse(callsign, previousState, fp, transcript);
+    text=rb.text; er=rb.er; st={...st,...rb.upd};
+  }
+  // Actual established report only, not "until established" readback.
+  else if(isActualEstablished(flags.text) && (previousState.phase==="approach_cleared" || ph.phase==="approach")){
+    text=`${callsign}, roger, contact tower${previousState.towerFrequency?` ${previousState.towerFrequency}`:""}.`;
+    er=expected([previousState.towerFrequency].filter(Boolean),"tower_handoff");
+    st.phase="tower_final";
+  }
+  else if(flags.onArrival||flags.wantsDescent){
+    const alt=chooseLowerAltitude(previousState,t);
     if(fp.star){
       text=`${callsign}, descend via the ${fp.star} arrival. Maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
       er=expected([fp.star,alt],"star_descent");
     }else{
       text=`${callsign}, descend and maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
-      er=expected([alt],"descent");
+      er=expected([alt,approach],"descent");
     }
     st.phase="arrival";
+    st.lastAssignedAltitude=alt;
   } else if(ph.phase==="ground"){
     if(/\b(IFR|CLEARANCE|CLEAR)\b/.test(flags.text)){
       const initial=previousState.initialAltitude||"5000";
       text=`${callsign}, cleared to ${fp.destination||"destination"}${fp.sid?` via the ${fp.sid} departure`:""}, then as filed. Climb and maintain ${spokenAltitude(initial)}. Expect ${spokenAltitude(fp.cruiseAltitude||"FL320")} ten minutes after departure. Squawk ${wordDigits(fp.assignedSquawk||"4660")}.`;
       er=expected([fp.destination,fp.sid,initial,fp.assignedSquawk||"4660"],"clearance");
       st.phase="clearance_issued";
+      st.lastAssignedAltitude=initial;
     }else if(/\b(PUSH|START|ENGINE)\b/.test(flags.text)){
       text=`${callsign}, pushback and startup approved. Report ready to taxi.`;
       er=expected(["pushback","startup"],"push_start");
@@ -287,6 +377,7 @@ function makeResponse(transcript="", flightPlan={}, telemetry={}, previousState=
       er=expected([target],"climb");
     }
     st.phase="enroute";
+    st.lastAssignedAltitude=target;
   } else if(ph.phase==="enroute"){
     if(flags.routeReport || reported){
       const rr=routeReportResponse(callsign,fp,st,reported);
@@ -323,27 +414,23 @@ function makeResponse(transcript="", flightPlan={}, telemetry={}, previousState=
       }
     }
   } else if(ph.phase==="arrival"){
-    const alt=previousState.arrivalAltitude || (t.distanceToDestination!=null && t.distanceToDestination<80 ? "8000":"12000");
+    const alt=chooseLowerAltitude(previousState,t);
     if(fp.star){
       text=`${callsign}, descend via the ${fp.star} arrival. Maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
       er=expected([fp.star,alt],"star_descent");
     }else{
       text=`${callsign}, descend and maintain ${spokenAltitude(alt)}. Expect ${approach} ${runway?spokenRunway(runway):""}.`;
-      er=expected([alt],"descent");
+      er=expected([alt,approach],"descent");
     }
     st.phase="approach_pending";
+    st.lastAssignedAltitude=alt;
   } else if(ph.phase==="approach" || ph.phase==="approach_pending" || ph.phase==="approach_cleared"){
-    if(flags.approach && /\bESTABLISHED\b/.test(flags.text)){
-      text=`${callsign}, roger, contact tower${previousState.towerFrequency?` ${previousState.towerFrequency}`:""}.`;
-      er=expected([previousState.towerFrequency].filter(Boolean),"tower_handoff");
-      st.phase="tower_final";
-    }else{
-      const alt=previousState.approachAltitude||"3000";
-      const hdg=previousState.interceptHeading||runwayInterceptHeading(runway,t.heading);
-      text=`${callsign}, fly ${spokenHeading(hdg)}, maintain ${spokenAltitude(alt)} until established, cleared ${approach} ${runway?spokenRunway(runway):"approach"}.`;
-      er=expected([String(hdg),alt,approach,runway].filter(Boolean),"approach_clearance");
-      st.phase="approach_cleared";
-    }
+    const alt=previousState.approachAltitude||"3000";
+    const hdg=previousState.interceptHeading||runwayInterceptHeading(runway,t.heading);
+    text=`${callsign}, fly ${spokenHeading(hdg)}, maintain ${spokenAltitude(alt)} until established, cleared ${approach} ${runway?spokenRunway(runway):"approach"}.`;
+    er=expected([String(hdg),alt,approach,runway].filter(Boolean),"approach_clearance");
+    st.phase="approach_cleared";
+    st.lastAssignedAltitude=alt;
   } else if(ph.phase==="tower_final"){
     text=`${callsign}, ${runway?spokenRunway(runway):"runway"}, cleared to land.`;
     er=expected(["cleared to land",runway].filter(Boolean),"landing");
@@ -358,7 +445,7 @@ function makeResponse(transcript="", flightPlan={}, telemetry={}, previousState=
     ok:true,
     atcResponseText:st.lastAtcTransmission,
     updatedState:st,
-    debug:{version:"7.0.3",phase:st.phase,controller:st.controller,reason:ph.reason,intent:ph.intent,reportedToken:reported,route:{routeTokens:fp.routeTokens,routeFixes:fp.routeFixes,routeAirways:fp.routeAirways,procedures:fp.procedures,routeClassified:fp.routeClassified},telemetry:t}
+    debug:{version:"7.0.4",phase:st.phase,controller:st.controller,reason:ph.reason,intent:ph.intent,readbackDetected:isReadbackForExpected(transcript,previousState,fp),reportedToken:reported,route:{routeTokens:fp.routeTokens,routeFixes:fp.routeFixes,routeAirways:fp.routeAirways,procedures:fp.procedures,routeClassified:fp.routeClassified},telemetry:t}
   };
 }
 function validateReadback(transcript="", expectedTokens=[]){
@@ -374,7 +461,8 @@ function validateReadback(transcript="", expectedTokens=[]){
 export {
   parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry,
   deriveTelemetryPhase, transcriptIntent, makeResponse, validateReadback,
-  spokenAltitude, spokenHeading, spokenRunway, findReportedToken
+  spokenAltitude, spokenHeading, spokenRunway, findReportedToken,
+  isReadbackForExpected, isActualEstablished
 };
 export default {
   parseFlightPlan, sanitizeRouteToken, classifyRouteToken, normalizeTelemetry,
