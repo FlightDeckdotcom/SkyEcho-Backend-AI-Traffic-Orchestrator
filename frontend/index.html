@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SkyEchoCabin v7.3.0 Recovery</title><!-- v6.9.46 UltraStrict additive patch loaded. Original v6.9.45 preserved. v6.9.45: Departure readback guard fix: plain check-ins no longer trigger incomplete altitude/direct readback; SID/STAR procedure names skipped as direct-to route fixes. -->
+<title>SkyEchoCabin v6.9.70 Native ATC + Quiet Telemetry Verify</title><!-- v6.9.46 UltraStrict additive patch loaded. Original v6.9.45 preserved. v6.9.45: Departure readback guard fix: plain check-ins no longer trigger incomplete altitude/direct readback; SID/STAR procedure names skipped as direct-to route fixes. -->
 <style>
 :root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#020817;color:#f8fafc}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,rgba(34,211,238,.14),transparent 24%),linear-gradient(180deg,#020817,#08111f 45%,#020817)}button,input,select,textarea{font:inherit}button{cursor:pointer}.app-shell{max-width:1440px;margin:0 auto;padding:24px}.hero,.panel,.status-card,.audit-tile,.log,.transcript-box,.crew-box,.readback-box,.phase-badge,.notice{border:1px solid rgba(148,163,184,.22);box-shadow:0 10px 30px #0000003d}.hero{display:flex;justify-content:space-between;align-items:center;gap:18px;background:#020617e6;border-radius:28px;padding:24px;margin-bottom:18px}.hero h1{margin:0;font-size:clamp(2rem,3vw,3rem);color:#fff}.hero p{margin:8px 0 0;color:#dbeafe;max-width:720px}.phase-badge{background:#22d3ee24;color:#cffafe;border-radius:999px;padding:12px 18px;font-weight:700}.top-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px}.status-card{background:#080f1ef5;border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:8px}.status-card svg{color:#67e8f9}.status-card span{color:#cbd5e1;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em}.status-card strong{color:#fff;font-size:1.05rem}.main-grid{display:grid;grid-template-columns:1.35fr .95fr;gap:18px}.sidebar{display:flex;flex-direction:column;gap:18px}.panel{background:#020617eb;border-radius:28px;padding:20px}.panel.compact{padding:18px}.panel-header{display:flex;align-items:center;gap:10px;margin-bottom:16px}.panel-header.spaced{margin-top:18px}.panel-header h2{margin:0;font-size:1.15rem;color:#fff}.panel-header svg{color:#67e8f9}.ptt{width:100%;min-height:230px;border-radius:32px;padding:20px;border:1px solid rgba(255,255,255,.24);display:flex;flex-direction:column;justify-content:center;gap:20px;transition:transform .15s ease,filter .15s ease}.ptt:hover{filter:brightness(1.04)}.ptt:active{transform:scale(.99)}.ptt.idle{background:#fff;color:#0f172a}.ptt.transmitting{background:#10b981;color:#fff}.ptt.receiving{background:#0ea5e9;color:#fff}.ptt-head{display:flex;align-items:center;justify-content:center;gap:14px;font-size:1.5rem;font-weight:800}.readback-box{background:#02061738;border-radius:24px;padding:16px;max-width:920px;margin:0 auto;text-align:center}.readback-box small{text-transform:uppercase;letter-spacing:.18em;display:block;margin-bottom:8px;color:inherit;opacity:.9}.readback-box p{margin:0;font-size:1rem;font-weight:700;line-height:1.45}.two-col,.mic-grid,.form-grid,.audit-grid{display:grid;gap:14px}.two-col{grid-template-columns:repeat(2,1fr)}.mic-grid{grid-template-columns:repeat(3,1fr)}.form-grid,.audit-grid{grid-template-columns:repeat(2,1fr)}label{display:block;margin-bottom:8px;color:#f8fafc;font-size:.92rem;font-weight:700;text-transform:capitalize}input,select,textarea{width:100%;background:#0f172a;color:#f8fafc;border:1px solid rgba(148,163,184,.22);border-radius:16px;padding:12px 14px}textarea{min-height:118px;resize:vertical}input::placeholder,textarea::placeholder{color:#94a3b8}.transcript-box,.crew-box{background:#0f172a;color:#fff;border-radius:16px;padding:14px;min-height:118px}.crew-box{min-height:auto}.controls-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}.primary,.secondary,.upload-btn{border:0;border-radius:16px;padding:12px 16px;font-weight:800}.primary{background:#67e8f9;color:#082f49}.secondary,.upload-btn{background:#1e293b;color:#f8fafc;border:1px solid rgba(148,163,184,.2)}.upload-btn{display:inline-flex;align-items:center;gap:8px}.meter-wrap{margin-top:14px}.meter-label{display:flex;justify-content:space-between;color:#dbeafe;margin-bottom:8px}.meter{height:14px;width:100%;background:#0f172a;border-radius:999px;overflow:hidden;border:1px solid rgba(148,163,184,.2)}.meter-fill{height:100%;background:linear-gradient(90deg,#22d3ee,#10b981)}.notice{margin-top:14px;border-radius:16px;padding:12px 14px;display:flex;align-items:center;gap:8px}.notice.success{background:#10b98124;color:#d1fae5}.notice.warning{background:#f59e0b24;color:#fde68a}.audit-tile{background:#0f172a;border-radius:16px;padding:14px}.audit-tile span{display:block;color:#cbd5e1;margin-bottom:4px;text-transform:capitalize}.audit-tile strong{color:#fff}.logs-panel{margin-top:18px}.logs-wrap{display:flex;flex-direction:column;gap:12px;max-height:430px;overflow:auto}.log{border-radius:18px;padding:14px}.log-meta{display:flex;justify-content:space-between;color:#cbd5e1;text-transform:uppercase;letter-spacing:.08em;font-size:.72rem;margin-bottom:6px}.log-atc{background:#0ea5e91f}.log-pilot{background:#10b9811f}.log-crew{background:#a855f71f}.log-network{background:#22d3ee1f}.log-system{background:#1e293beb}@media (max-width: 1100px){.top-grid{grid-template-columns:repeat(2,1fr)}.main-grid{grid-template-columns:1fr}}@media (max-width: 760px){.app-shell{padding:14px}.hero{flex-direction:column;align-items:flex-start}.two-col,.mic-grid,.form-grid,.audit-grid,.top-grid{grid-template-columns:1fr}.ptt-head{font-size:1.2rem}}.eleven-grid,.inline-note{margin-bottom:14px}.inline-submit{display:flex;gap:10px;align-items:stretch}.inline-submit textarea{flex:1}.inline-field{display:flex;gap:10px;align-items:center}.inline-field input{flex:1}.enter-btn,.small-btn{white-space:nowrap;display:inline-flex;align-items:center;gap:6px}.small-btn{padding-inline:16px}@media (max-width: 900px){.inline-submit,.inline-field{flex-direction:column}}
 
@@ -2382,69 +2382,7 @@ async function Ii(c,role="atc"){
   const prior=window.__skyechoTtsSerial.catch(()=>{});
   window.__skyechoTtsSerial=prior.then(job);
   return window.__skyechoTtsSerial;
-}try{window.__skyechoAiSpeakAtc=async function(text){return Ii(String(text||""),"atc")};window.__skyechoAiAtcVoiceBridgeVersion="6.9.6";}catch(__e){}function uf(c,d){const w=$e(c);return ai(w)&&hr(w,d)&&!D(w,["with you","checking in","maintaining","passing","climbing","descending","approach","final","ground","tower","departure","center"])}async function V(c,d){window.__skyechoLastAtcTs=Date.now(); if(!/\bnegative\b|say again request|, roger\.?$/i.test(c)){tu.current=c; try{UxV30SetExpected(c)}catch(__e){H("system",`Token expectation skipped: ${(__e&&__e.message)||"unknown"}.`)}} try{c=UxAtcHumanizeText(c)}catch(__e){} H("atc",c); window.__skyechoFollowup&&window.clearTimeout(window.__skyechoFollowup); d&&(/\bcontact\b/i.test(c)?(Yr(d),r("checkin")):Kt(d)); await Ii(c,"atc"); (/\bnegative\b|say again request|readback correct|, roger\.?$/i.test(c)||n!=="readback"&&n!=="checkin")||(window.__skyechoFollowup=window.setTimeout(()=>{Je.current||v==="transmitting"||H("system","Awaiting pilot response to last ATC transmission.")},18e3))}async function uu(c){const d=c.trim();if(!d)return;
-/* SkyEcho v7.3.0 Recovery Bridge
-   This is a surgical frontend update:
-   - typed response and PTT transcripts go to Render /api/atc/respond first
-   - backend v7 ATC Nav Engine becomes the primary ATC brain
-   - old local parser only runs if backend fails
-   - prevents old frontend parser from demanding "say again Charlotte/KCLT"
-*/
-try{
-  if(window.__SKYECHO_FORCE_BACKEND_ATC!==false){
-    const __ctrl=new AbortController();
-    const __to=setTimeout(()=>__ctrl.abort(),6500);
-    const __plan=(typeof l==="object"&&l)?{
-      callsign:l.callsign||"",
-      aircraft:l.aircraft||l.aircraftType||"",
-      origin:l.origin||l.departure||"",
-      departure:l.departure||l.origin||"",
-      destination:l.destination||l.dest||l.arrival||"",
-      arrival:l.arrival||l.destination||l.dest||"",
-      route:l.route||"",
-      routeRaw:l.routeRaw||l.route||"",
-      sid:l.sid||l.departureProcedure||"",
-      departureProcedure:l.departureProcedure||l.sid||"",
-      star:l.star||l.arrivalProcedure||"",
-      arrivalProcedure:l.arrivalProcedure||l.star||"",
-      requestedApproach:l.requestedApproach||l.approach||"",
-      approach:l.approach||l.requestedApproach||"",
-      arrRunway:l.arrRunway||l.runway||l.assignedRunway||l.depRunway||"",
-      runway:l.runway||l.arrRunway||l.assignedRunway||l.depRunway||"",
-      cruiseAltitude:l.cruiseAltitude||l.cruise||"",
-      assignedSquawk:l.assignedSquawk||l.squawk||"",
-      squawk:l.squawk||l.assignedSquawk||""
-    }:{};
-    const __telemetry=window.__skyechoTelemetryState||window.__skyechoLastKnownTelemetry||null;
-    const __body={transcript:d,text:d,...__plan,flightPlan:__plan,telemetry:__telemetry};
-    H("network",`SkyEcho v7.3 backend ATC request sent to ${localStorage.getItem("skyecho.core.backend")||window.__SKYECHO_BACKEND_URL||"https://skyecho-backend-ai-traffic-orchestrator.onrender.com"}.`);
-    const __backend=String(localStorage.getItem("skyecho.core.backend")||window.__SKYECHO_BACKEND_URL||"https://skyecho-backend-ai-traffic-orchestrator.onrender.com").replace(/\/$/,"");
-    const __r=await fetch(__backend+"/api/atc/respond",{
-      method:"POST",
-      headers:{"content-type":"application/json"},
-      body:JSON.stringify(__body),
-      cache:"no-store",
-      signal:__ctrl.signal
-    });
-    clearTimeout(__to);
-    const __raw=await __r.text();
-    let __data;try{__data=JSON.parse(__raw)}catch{__data={raw:__raw}};
-    if(!__r.ok)throw new Error("HTTP "+__r.status+": "+__raw.slice(0,240));
-    const __atc=(__data.atcResponseText||__data.atc||__data.response||"").trim();
-    if(__atc){
-      try{h(d)}catch{}
-      H("pilot",d);
-      H("network",`SkyEcho v7.3 backend ATC accepted. Phase: ${(__data.engine&&__data.engine.phase)||(__data.debug&&__data.debug.phase)||"unknown"}.`);
-      await V(__atc,J);
-      j("");
-      return;
-    }
-    throw new Error("Backend returned no ATC text.");
-  }
-}catch(__v701e){
-  try{H("system",`SkyEcho v7.3 backend ATC unavailable, using local fallback: ${(__v701e&&__v701e.message)||"unknown"}.`)}catch{}
-}
- if(await UxV30ProcessExpectedReadback(d))return; if(await UxV30EarlyRouteReport(d))return; if(await UxV30EarlyPhaseRequests(d))return;
+}try{window.__skyechoAiSpeakAtc=async function(text){return Ii(String(text||""),"atc")};window.__skyechoAiAtcVoiceBridgeVersion="6.9.6";}catch(__e){}function uf(c,d){const w=$e(c);return ai(w)&&hr(w,d)&&!D(w,["with you","checking in","maintaining","passing","climbing","descending","approach","final","ground","tower","departure","center"])}async function V(c,d){window.__skyechoLastAtcTs=Date.now(); if(!/\bnegative\b|say again request|, roger\.?$/i.test(c)){tu.current=c; try{UxV30SetExpected(c)}catch(__e){H("system",`Token expectation skipped: ${(__e&&__e.message)||"unknown"}.`)}} try{c=UxAtcHumanizeText(c)}catch(__e){} H("atc",c); window.__skyechoFollowup&&window.clearTimeout(window.__skyechoFollowup); d&&(/\bcontact\b/i.test(c)?(Yr(d),r("checkin")):Kt(d)); await Ii(c,"atc"); (/\bnegative\b|say again request|readback correct|, roger\.?$/i.test(c)||n!=="readback"&&n!=="checkin")||(window.__skyechoFollowup=window.setTimeout(()=>{Je.current||v==="transmitting"||H("system","Awaiting pilot response to last ATC transmission.")},18e3))}async function uu(c){const d=c.trim();if(!d)return; if(await UxV30ProcessExpectedReadback(d))return; if(await UxV30EarlyRouteReport(d))return; if(await UxV30EarlyPhaseRequests(d))return;
 /* SkyEcho v19 priority clearance guard: IFR/VFR clearance requests must never fall into generic roger. */
 function UxV19ClearanceText(x){return $e(String(x||""))
   .replace(/\bfir\b/g,"ifr")
@@ -3120,7 +3058,7 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
     const route=(localStorage.getItem('skyecho_route')||'');
     return { phase, controllerRole, frequency, userPhase:phase, userControllerRole:controllerRole, userFrequency:frequency, route };
   }
-  function connect(silent){save(); try{ if(state.ws) state.ws.close(); }catch(_){} state.ws=new WebSocket(wsUrl()); state.ws.onopen=()=>{state.connected=true;updateStatus();addLog('WS','Backend websocket connected.'); if(state.autoReady) setTimeout(()=>prepareBackend().catch(e=>addLog('ERROR','Backend prepare failed: '+e.message)),600);}; state.ws.onclose=()=>{state.connected=false;updateStatus(); if(!silent) addLog('WS','Backend websocket closed.');}; state.ws.onerror=()=>addLog('ERROR','Backend websocket error.'); state.ws.onmessage=e=>{ if(window.__skyechoTrafficV2Stopped) return;try{handleMessage(JSON.parse(e.data));}catch(_){}}; }
+  function connect(silent){save(); try{ if(state.ws) state.ws.close(); }catch(_){} state.ws=new WebSocket(wsUrl()); state.ws.onopen=()=>{state.connected=true;updateStatus();addLog('WS','Backend websocket connected.'); if(state.autoReady) setTimeout(()=>prepareBackend().catch(e=>addLog('ERROR','Backend prepare failed: '+e.message)),600);}; state.ws.onclose=()=>{state.connected=false;updateStatus(); if(!silent) addLog('WS','Backend websocket closed.');}; state.ws.onerror=()=>addLog('ERROR','Backend websocket error.'); state.ws.onmessage=e=>{try{handleMessage(JSON.parse(e.data));}catch(_){}}; }
 
   function digitsToWords(s){return String(s||'').replace(/\b(\d)\b/g,function(_,d){return ['zero','one','two','three','four','five','six','seven','eight','niner'][Number(d)]||d;});}
   function normalizeRunway(r){r=String(r||'07').toUpperCase().replace(/^0?(\d)$/,'0$1');return r;}
@@ -4113,7 +4051,6 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
     return base()+'/'+s.replace(/^\.\//,'');
   }
   function armTrafficV2PiperPlayback(){
-    window.__skyechoTrafficV2Stopped=false;
     window.__skyechoTrafficV2PiperArmed=true;
     try{
       const A=window.AudioContext||window.webkitAudioContext;
@@ -4174,7 +4111,6 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
       await releaseTrafficV2Queue('off-frequency traffic hidden');
       return;
     }
-    if(window.__skyechoTrafficV2Stopped){trafficV2AudioLog('STOPPED','Traffic v2 audio blocked because traffic is stopped.');return;}
     if(!window.__skyechoTrafficV2PiperArmed){
       trafficV2AudioLog('AUDIO LOCKED','Click Start Traffic v2 once to unlock browser audio.');
       return;
@@ -4184,7 +4120,6 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
     drainTrafficV2PiperQueue();
   }
   async function drainTrafficV2PiperQueue(){
-    if(window.__skyechoTrafficV2Stopped){window.__skyechoTrafficV2PiperQueue=[];window.__skyechoTrafficV2PiperPlaying=false;return;}
     if(window.__skyechoTrafficV2PiperPlaying) return;
     const q=window.__skyechoTrafficV2PiperQueue||[];
     const item=q.shift();
@@ -4456,23 +4391,9 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
         try{ armTrafficV2PiperPlayback(); }catch(e){ log('AUDIO ERROR','Traffic v2 Piper arm failed: '+(e&&e.message||e)); }
       }catch(e){log('ERROR','Traffic v2 start failed: '+(e.message||e))}
     }
-    
-    function hardStopTrafficV2Audio(){
-      try{window.__skyechoTrafficV2Stopped=true;}catch(_){}
-      try{window.__skyechoTrafficV2PiperArmed=false;}catch(_){}
-      try{window.__skyechoTrafficV2PiperQueue=[];}catch(_){}
-      try{window.__skyechoTrafficV2PiperPlaying=false;}catch(_){}
-      try{if(window.__skyechoTrafficV2AutoRelease){clearInterval(window.__skyechoTrafficV2AutoRelease);window.__skyechoTrafficV2AutoRelease=null}}catch(_){}
-      try{if(window.__skyechoTrafficV2AudioWs){window.__skyechoTrafficV2AudioWs.onmessage=null;window.__skyechoTrafficV2AudioWs.onopen=null;window.__skyechoTrafficV2AudioWs.onclose=null;window.__skyechoTrafficV2AudioWs.onerror=null;window.__skyechoTrafficV2AudioWs.close();window.__skyechoTrafficV2AudioWs=null}}catch(_){}
-      try{if(window.speechSynthesis) window.speechSynthesis.cancel();}catch(_){}
-      try{if(window.__skyechoTrafficV2AudioCtx && window.__skyechoTrafficV2AudioCtx.state==='running') window.__skyechoTrafficV2AudioCtx.suspend().catch(()=>{});}catch(_){}
-      try{window.__skyechoTrafficState=[];window.__skyechoTrafficQueue=[];window.__skyechoTrafficDensity=0;}catch(_){}
-      try{localStorage.setItem('skyecho_ai_traffic_enabled','false');localStorage.setItem('skyecho_traffic_density','0');localStorage.setItem('skyecho_traffic_v2_stopped','1');}catch(_){}
-    }
-
     async function stop(){
       try{
-        hardStopTrafficV2Audio();
+        if(window.__skyechoTrafficV2AutoRelease){clearInterval(window.__skyechoTrafficV2AutoRelease);window.__skyechoTrafficV2AutoRelease=null}
         const j=await api('/traffic-v2/stop',{source:'floating_ui_traffic_v2_only'});
         log('STOP',JSON.stringify(j).slice(0,900));
         setTimeout(state,500);
@@ -4482,7 +4403,6 @@ window.SkyEchoDiscordBridge = window.SkyEchoDiscordBridge || {
     window.__skyechoTrafficV2Start=start;
     window.__skyechoTrafficV2State=state;
     window.__skyechoTrafficV2Stop=stop;
-    window.__skyechoHardStopTrafficV2=hardStopTrafficV2Audio;
 
     qs('tr_rescue_min').onclick=function(){p.classList.toggle('min');this.textContent=p.classList.contains('min')?'+':'–'};
     qs('tr_rescue_prepare').onclick=health;
@@ -4945,7 +4865,50 @@ if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",
 </script>
 
 
-<!-- SkyEcho v7.3.0 Recovery Bridge Marker -->
+<!-- SkyEcho SAFE ROLLBACK v6.9.70: hard traffic stop patch only -->
+<script id="skyechoSafeRollbackTrafficStopPatch">
+(function(){
+  if(window.__skyechoSafeRollbackTrafficStopPatch)return;
+  window.__skyechoSafeRollbackTrafficStopPatch=true;
+
+  function hardStopTraffic(){
+    try{window.__skyechoTrafficV2Stopped=true;}catch(_){}
+    try{window.__skyechoTrafficV2PiperArmed=false;}catch(_){}
+    try{window.__skyechoTrafficV2PiperQueue=[];}catch(_){}
+    try{window.__skyechoTrafficV2PiperPlaying=false;}catch(_){}
+    try{if(window.__skyechoTrafficV2AutoRelease){clearInterval(window.__skyechoTrafficV2AutoRelease);window.__skyechoTrafficV2AutoRelease=null;}}catch(_){}
+    try{if(window.__skyechoTrafficV2AudioWs){window.__skyechoTrafficV2AudioWs.onmessage=null;window.__skyechoTrafficV2AudioWs.onopen=null;window.__skyechoTrafficV2AudioWs.onclose=null;window.__skyechoTrafficV2AudioWs.onerror=null;window.__skyechoTrafficV2AudioWs.close();window.__skyechoTrafficV2AudioWs=null;}}catch(_){}
+    try{if(window.speechSynthesis)window.speechSynthesis.cancel();}catch(_){}
+    try{window.__skyechoTrafficState=[];window.__skyechoTrafficQueue=[];window.__skyechoTrafficDensity=0;}catch(_){}
+    try{
+      localStorage.setItem('skyecho_ai_traffic_enabled','false');
+      localStorage.setItem('skyecho_ai_traffic_frontend_disabled','1');
+      localStorage.setItem('skyecho_traffic_density','0');
+      localStorage.setItem('skyecho_traffic_v2_stopped','1');
+    }catch(_){}
+  }
+
+  window.__skyechoHardStopTrafficV2=hardStopTraffic;
+
+  const oldStop=window.__skyechoTrafficV2Stop;
+  window.__skyechoTrafficV2Stop=async function(){
+    hardStopTraffic();
+    try{
+      const base=(localStorage.getItem('skyecho_traffic_v2_only_backend')||'https://skyecho-backend-ai-traffic-orchestrator.onrender.com').replace(/\/$/,'');
+      await fetch(base+'/traffic-v2/stop',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({source:'safe_rollback_hard_stop'})});
+    }catch(_){}
+    try{return oldStop?await oldStop():{ok:true,stopped:true};}catch(_){return {ok:true,stopped:true};}
+  };
+
+  document.addEventListener('click',function(e){
+    try{
+      const txt=String((e.target&&e.target.textContent)||'').toLowerCase();
+      if(txt.includes('stop') && txt.includes('traffic')) hardStopTraffic();
+    }catch(_){}
+  },true);
+})();
+</script>
+
 </body>
 </html>
 <!-- SkyEcho v6.9.67: removed v6.9.62/v6.9.63 invasive ATC fetch/TTS overrides; restored native engine and redirected obsolete FS2EFB polling. -->
